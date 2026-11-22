@@ -1,10 +1,5 @@
 import asyncio
 
-# Proxy disabled — was causing 60s+ delays per account
-# All connections go direct
-
-_proxy_pool = []
-
 async def fetch_proxies():
     pass
 
