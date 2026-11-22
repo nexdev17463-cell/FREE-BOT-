@@ -1,0 +1,32 @@
+name: Mass Report Bot 24/7
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          API_ID:    ${{ secrets.API_ID }}
+          API_HASH:  ${{ secrets.API_HASH }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+        run: python bot.py
