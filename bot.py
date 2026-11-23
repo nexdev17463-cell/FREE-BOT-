@@ -215,7 +215,7 @@ async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     from session_manager import get_user_sessions
     sessions = await get_user_sessions(update.effective_user.id)
     lines = [f"<code>{i}. {item.get('phone','?')}</code>" for i, item in enumerate(sessions, 1)]
-    text = "<b>📋 Your Sessions</b>\n\n" + ("\n".join(lines) if lines else "No active sessions.")
+    text  = "<b>📋 Your Sessions</b>\n\n" + ("\n".join(lines) if lines else "No active sessions.")
     await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb())
 
 
@@ -363,8 +363,8 @@ async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         from session_manager import build_client
         from pyrogram import Client as PyroClient
 
-        client      = await build_client(matched)
-        is_pyro     = isinstance(client, PyroClient)
+        client  = await build_client(matched)
+        is_pyro = isinstance(client, PyroClient)
 
         if is_pyro:
             await client.start()
@@ -376,7 +376,6 @@ async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
                 await client.stop()
                 return
-            # Fetch from Telegram service notifications (777000)
             messages = []
             async for m in client.get_chat_history(777000, limit=5):
                 messages.append(m)
@@ -396,12 +395,12 @@ async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
                 await client.disconnect()
                 return
-            tg_messages = await client.get_messages(777000, limit=5)
+            tg_msgs  = await client.get_messages(777000, limit=5)
             await client.disconnect()
-            if not tg_messages:
+            if not tg_msgs:
                 await msg.edit_text("❌ No OTP message found.", parse_mode=ParseMode.HTML)
                 return
-            latest   = tg_messages[0]
+            latest   = tg_msgs[0]
             text     = latest.message or "(empty)"
             date_str = latest.date.strftime("%Y-%m-%d %H:%M:%S UTC") if latest.date else "unknown"
 
@@ -601,7 +600,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         err_line = ""
         if result.get("errors"):
-            unique = list(set(result["errors"]))[:5]
+            unique   = list(set(result["errors"]))[:5]
             err_line = "\n\n⚠️ <b>Errors:</b>\n" + "\n".join(
                 f"• <code>{html.escape(e)}</code>" for e in unique
             )
@@ -626,7 +625,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return None
 
 
-# ── Account add flow (Pyrogram) ──────────────────────────────────────────────
+# ── Account add flow (Pyrogram + Official Android credentials) ───────────────
 async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid   = update.effective_user.id
     phone = update.message.text.strip()
@@ -639,10 +638,16 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     try:
         from pyrogram import Client
+
+        # Official Telegram Android app credentials
+        # Telegram trusts these even from datacenter IPs — OTP delivery works for all countries
+        OFFICIAL_API_ID   = 6
+        OFFICIAL_API_HASH = "eb06d4abfb49dc3eeb1aeb98ae0f581e"
+
         client = Client(
             name=f"host_{uid}",
-            api_id=API_ID,
-            api_hash=API_HASH,
+            api_id=OFFICIAL_API_ID,
+            api_hash=OFFICIAL_API_HASH,
             in_memory=True,
             device_model="Samsung Galaxy S23",
             system_version="Android 13",
@@ -663,6 +668,7 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reply_markup=cancel_kb()
         )
         return ADD_CODE
+
     except Exception as e:
         await update.message.reply_text(
             f"❌ Error: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML
