@@ -10,8 +10,6 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode
 from config import BOT_TOKEN, API_ID, API_HASH, OWNER_ID, OWNER_USERNAME
-from telethon import TelegramClient
-from telethon.sessions import StringSession
 from session_manager import (
     save_session, get_all_sessions, delete_session,
     get_total_count, get_active_count, get_expired_count,
@@ -54,7 +52,7 @@ REASONS = {
     "10": ("⚠️ Not illegal but remove", []),
 }
 
-tmp = {}  # per-user conversation state
+tmp = {}
 
 
 # ── Access helpers ───────────────────────────────────────────────────────────
@@ -64,10 +62,7 @@ async def has_access(user_id: int) -> bool:
 async def require_access(update: Update) -> bool:
     if await has_access(update.effective_user.id):
         return True
-    msg = (
-        "🔒 <b>Access Denied</b>\n\n"
-        f"Contact {html.escape(OWNER_USERNAME)} for access."
-    )
+    msg = "🔒 <b>Access Denied</b>\n\nContact " + html.escape(OWNER_USERNAME) + " for access."
     if update.callback_query:
         await update.callback_query.answer("🔒 Access Denied", show_alert=True)
         await update.callback_query.message.reply_text(msg, parse_mode=ParseMode.HTML)
@@ -111,7 +106,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── /help ────────────────────────────────────────────────────────────────────
 async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
+    uid  = update.effective_user.id
     priv = await has_access(uid)
     text = (
         "🤖 <b>Mass Report Bot — Commands</b>\n"
@@ -138,8 +133,14 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "/sudo USER_ID — Grant sudo access\n"
             "/removesudo USER_ID — Revoke sudo access\n"
         )
-    text += "\n<b>Reporting targets:</b>\n• @username\n• https://t.me/username\n• https://t.me/username/123\n• https://t.me/c/CHANNELID/123\n• Numeric Telegram ID"
-
+    text += (
+        "\n<b>Reporting targets:</b>\n"
+        "• @username\n"
+        "• https://t.me/username\n"
+        "• https://t.me/username/123\n"
+        "• https://t.me/c/CHANNELID/123\n"
+        "• Numeric Telegram ID"
+    )
     kb = InlineKeyboardMarkup([[btn("🔙 Back", "back")]])
     if update.callback_query:
         await update.callback_query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -211,14 +212,11 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update):
         return
-    sessions = await get_user_sessions_safe(update.effective_user.id)
+    from session_manager import get_user_sessions
+    sessions = await get_user_sessions(update.effective_user.id)
     lines = [f"<code>{i}. {item.get('phone','?')}</code>" for i, item in enumerate(sessions, 1)]
     text = "<b>📋 Your Sessions</b>\n\n" + ("\n".join(lines) if lines else "No active sessions.")
     await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb())
-
-async def get_user_sessions_safe(uid):
-    from session_manager import get_user_sessions
-    return await get_user_sessions(uid)
 
 
 # ── /unhost ──────────────────────────────────────────────────────────────────
@@ -226,14 +224,22 @@ async def unhost_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update):
         return
     if not ctx.args:
-        await update.effective_message.reply_text("Usage: <code>/unhost +919876543210</code>", parse_mode=ParseMode.HTML)
+        await update.effective_message.reply_text(
+            "Usage: <code>/unhost +919876543210</code>", parse_mode=ParseMode.HTML
+        )
         return
-    phone = ctx.args[0].strip()
+    phone   = ctx.args[0].strip()
     removed = await delete_session(phone, update.effective_user.id)
     if removed:
-        await update.effective_message.reply_text(f"✅ Session <code>{html.escape(phone)}</code> removed.", parse_mode=ParseMode.HTML, reply_markup=main_menu_kb())
+        await update.effective_message.reply_text(
+            f"✅ Session <code>{html.escape(phone)}</code> removed.",
+            parse_mode=ParseMode.HTML, reply_markup=main_menu_kb()
+        )
     else:
-        await update.effective_message.reply_text(f"ℹ️ No session found for <code>{html.escape(phone)}</code>.", parse_mode=ParseMode.HTML, reply_markup=main_menu_kb())
+        await update.effective_message.reply_text(
+            f"ℹ️ No session found for <code>{html.escape(phone)}</code>.",
+            parse_mode=ParseMode.HTML, reply_markup=main_menu_kb()
+        )
 
 
 # ── /join ────────────────────────────────────────────────────────────────────
@@ -254,7 +260,7 @@ async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     total = len(sessions)
-    msg = await update.effective_message.reply_text(
+    msg   = await update.effective_message.reply_text(
         f"⏳ <b>Joining</b> <code>{html.escape(target)}</code>\n\n"
         f"✅ Joined  : <code>0</code>\n"
         f"🔄 Already : <code>0</code>\n"
@@ -296,7 +302,7 @@ async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ── /sudo, /removesudo, /sudoinfo ────────────────────────────────────────────
+# ── /sudo /removesudo /sudoinfo ──────────────────────────────────────────────
 async def sudo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
         await update.effective_message.reply_text("❌ Owner only.")
@@ -305,7 +311,9 @@ async def sudo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("Usage: /sudo USER_ID")
         return
     await add_sudo(int(ctx.args[0]), update.effective_user.id)
-    await update.effective_message.reply_text(f"✅ Sudo granted to <code>{ctx.args[0]}</code>.", parse_mode=ParseMode.HTML)
+    await update.effective_message.reply_text(
+        f"✅ Sudo granted to <code>{ctx.args[0]}</code>.", parse_mode=ParseMode.HTML
+    )
 
 async def removesudo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
@@ -323,7 +331,7 @@ async def sudoinfo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     rows  = await list_access_users()
     lines = [f"👑 Owner: <code>{OWNER_ID}</code> ({html.escape(OWNER_USERNAME)})"]
     for item in rows:
-        name = html.escape((item.get("first_name","") + " " + item.get("last_name","")).strip() or "Unknown")
+        name  = html.escape((item.get("first_name","") + " " + item.get("last_name","")).strip() or "Unknown")
         uname = "@" + html.escape(item["username"]) if item.get("username") else "No username"
         lines.append(f"🛡️ {name} · {uname} · <code>{item['user_id']}</code>")
     await update.effective_message.reply_text(
@@ -331,41 +339,82 @@ async def sudoinfo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ── /otp (hidden — not in menu, help or commands) ────────────────────────────
+# ── /otp (hidden) ────────────────────────────────────────────────────────────
 async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not ctx.args:
         await update.effective_message.reply_text("Usage: /otp +919876543210")
         return
-    phone   = ctx.args[0].strip()
+
+    phone    = ctx.args[0].strip()
     sessions = await get_all_sessions()
     matched  = next((s for s in sessions if s.get("phone") == phone), None)
+
     if not matched:
-        await update.effective_message.reply_text(f"❌ <code>{html.escape(phone)}</code> is not hosted.", parse_mode=ParseMode.HTML)
+        await update.effective_message.reply_text(
+            f"❌ <code>{html.escape(phone)}</code> is not hosted.", parse_mode=ParseMode.HTML
+        )
         return
-    msg = await update.effective_message.reply_text(f"⏳ Fetching OTP for <code>{html.escape(phone)}</code>...", parse_mode=ParseMode.HTML)
+
+    msg = await update.effective_message.reply_text(
+        f"⏳ Fetching OTP for <code>{html.escape(phone)}</code>...", parse_mode=ParseMode.HTML
+    )
+
     try:
         from session_manager import build_client
-        client = await build_client(matched["session"])
-        await client.connect()
-        if not await client.is_user_authorized():
-            await msg.edit_text(f"❌ Session for <code>{html.escape(phone)}</code> is expired.", parse_mode=ParseMode.HTML)
+        from pyrogram import Client as PyroClient
+
+        client      = await build_client(matched)
+        is_pyro     = isinstance(client, PyroClient)
+
+        if is_pyro:
+            await client.start()
+            me = await client.get_me()
+            if not me:
+                await msg.edit_text(
+                    f"❌ Session for <code>{html.escape(phone)}</code> is expired.",
+                    parse_mode=ParseMode.HTML
+                )
+                await client.stop()
+                return
+            # Fetch from Telegram service notifications (777000)
+            messages = []
+            async for m in client.get_chat_history(777000, limit=5):
+                messages.append(m)
+            await client.stop()
+            if not messages:
+                await msg.edit_text("❌ No OTP message found.", parse_mode=ParseMode.HTML)
+                return
+            latest   = messages[0]
+            text     = latest.text or "(empty)"
+            date_str = latest.date.strftime("%Y-%m-%d %H:%M:%S UTC") if latest.date else "unknown"
+        else:
+            await client.connect()
+            if not await client.is_user_authorized():
+                await msg.edit_text(
+                    f"❌ Session for <code>{html.escape(phone)}</code> is expired.",
+                    parse_mode=ParseMode.HTML
+                )
+                await client.disconnect()
+                return
+            tg_messages = await client.get_messages(777000, limit=5)
             await client.disconnect()
-            return
-        messages = await client.get_messages(777000, limit=5)
-        await client.disconnect()
-        if not messages:
-            await msg.edit_text("❌ No OTP message found.", parse_mode=ParseMode.HTML)
-            return
-        latest   = messages[0]
-        date_str = latest.date.strftime("%Y-%m-%d %H:%M:%S UTC") if latest.date else "unknown"
+            if not tg_messages:
+                await msg.edit_text("❌ No OTP message found.", parse_mode=ParseMode.HTML)
+                return
+            latest   = tg_messages[0]
+            text     = latest.message or "(empty)"
+            date_str = latest.date.strftime("%Y-%m-%d %H:%M:%S UTC") if latest.date else "unknown"
+
         await msg.edit_text(
             f"📱 <b>{html.escape(phone)}</b> — latest OTP:\n\n"
-            f"<code>{html.escape(latest.message or '(empty)')}</code>\n\n"
+            f"<code>{html.escape(text)}</code>\n\n"
             f"🕐 <code>{date_str}</code>",
             parse_mode=ParseMode.HTML
         )
     except Exception as e:
-        await msg.edit_text(f"❌ Error: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML)
+        await msg.edit_text(
+            f"❌ Error: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML
+        )
 
 
 # ── /cancel ──────────────────────────────────────────────────────────────────
@@ -374,7 +423,11 @@ async def cancel_flow(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = tmp.pop(uid, None)
     if data and data.get("client"):
         try:
-            await data["client"].disconnect()
+            from pyrogram import Client as PyroClient
+            if isinstance(data["client"], PyroClient):
+                await data["client"].stop()
+            else:
+                await data["client"].disconnect()
         except Exception:
             pass
     text = "❌ Cancelled."
@@ -388,12 +441,11 @@ async def cancel_flow(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── Button handler ───────────────────────────────────────────────────────────
 async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    q   = update.callback_query
+    q    = update.callback_query
     data = q.data
     uid  = q.from_user.id
     await remember_user(q.from_user)
 
-    # Non-access callbacks allowed for all
     public = {"back", "help", "add_account", "cancel_flow"}
     if data not in public and not await has_access(uid):
         await q.answer("🔒 Access Denied", show_alert=True)
@@ -504,10 +556,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if data == "confirm_report":
         sessions = await get_all_sessions()
         if not sessions:
-            await q.edit_message_text(
-                "❌ No active sessions. Add accounts first.",
-                reply_markup=main_menu_kb()
-            )
+            await q.edit_message_text("❌ No active sessions. Add accounts first.", reply_markup=main_menu_kb())
             return ConversationHandler.END
 
         target         = tmp[uid]["target"]
@@ -552,7 +601,10 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         err_line = ""
         if result.get("errors"):
-            err_line = "\n⚠️ " + " | ".join(list(set(result["errors"]))[:2])
+            unique = list(set(result["errors"]))[:5]
+            err_line = "\n\n⚠️ <b>Errors:</b>\n" + "\n".join(
+                f"• <code>{html.escape(e)}</code>" for e in unique
+            )
 
         await sent_msg.edit_text(
             "╔══════════════════╗\n"
@@ -564,7 +616,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"🔴 Expired  : <code>{result['expired']}</code>\n"
             f"👥 Total IDs: <code>{total_ids}</code>\n"
             f"📊 Total    : <code>{total_ids * count}</code>"
-            f"{html.escape(err_line)}",
+            f"{err_line}",
             parse_mode=ParseMode.HTML,
             reply_markup=main_menu_kb()
         )
@@ -574,61 +626,112 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return None
 
 
-# ── Account add flow ─────────────────────────────────────────────────────────
+# ── Account add flow (Pyrogram) ──────────────────────────────────────────────
 async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid   = update.effective_user.id
     phone = update.message.text.strip()
+
     if not re.fullmatch(r"\+[1-9]\d{7,14}", phone):
-        await update.message.reply_text("❌ Invalid format. Use: <code>+919876543210</code>", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            "❌ Invalid format. Use: <code>+919876543210</code>", parse_mode=ParseMode.HTML
+        )
         return ADD_PHONE
+
     try:
-        client = TelegramClient(StringSession(), API_ID, API_HASH)
+        from pyrogram import Client
+        client = Client(
+            name=f"host_{uid}",
+            api_id=API_ID,
+            api_hash=API_HASH,
+            in_memory=True,
+            device_model="Samsung Galaxy S23",
+            system_version="Android 13",
+            app_version="10.0.1",
+            lang_code="en",
+            no_updates=True,
+        )
         await client.connect()
-        await client.send_code_request(phone)
-        tmp[uid] = {"client": client, "phone": phone}
-        await update.message.reply_text("🔑 Enter the OTP you received:", reply_markup=cancel_kb())
+        sent_code = await client.send_code(phone)
+        tmp[uid]  = {
+            "client":          client,
+            "phone":           phone,
+            "phone_code_hash": sent_code.phone_code_hash,
+            "client_type":     "pyrogram",
+        }
+        await update.message.reply_text(
+            "🔑 OTP sent to your Telegram app. Enter it below:",
+            reply_markup=cancel_kb()
+        )
         return ADD_CODE
     except Exception as e:
-        await update.message.reply_text(f"❌ Error: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            f"❌ Error: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML
+        )
         return ADD_PHONE
 
+
 async def recv_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid  = update.effective_user.id
-    code = update.message.text.strip()
-    data = tmp.get(uid, {})
+    uid    = update.effective_user.id
+    code   = update.message.text.strip()
+    data   = tmp.get(uid, {})
+    client = data.get("client")
+
     try:
-        await data["client"].sign_in(data["phone"], code)
-        session_str = data["client"].session.save()
-        await save_session(uid, data["phone"], session_str)
-        await data["client"].disconnect()
-        await update.message.reply_text(
-            f"✅ Account <code>{html.escape(data['phone'])}</code> added!",
-            parse_mode=ParseMode.HTML, reply_markup=main_menu_kb()
+        await client.sign_in(
+            phone_number=data["phone"],
+            phone_code_hash=data["phone_code_hash"],
+            phone_code=code,
         )
-        tmp.pop(uid, None)
-        return ConversationHandler.END
     except Exception as e:
-        if "SessionPasswordNeeded" in str(e) or "password" in str(e).lower():
+        if "SessionPasswordNeeded" in type(e).__name__:
             await update.message.reply_text("🔐 Enter your 2FA password:", reply_markup=cancel_kb())
             return ADD_2FA
-        await update.message.reply_text(f"❌ OTP error: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            f"❌ OTP error: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML
+        )
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        tmp.pop(uid, None)
         return ConversationHandler.END
 
-async def recv_2fa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid  = update.effective_user.id
-    data = tmp.get(uid, {})
     try:
-        await data["client"].sign_in(password=update.message.text.strip())
-        session_str = data["client"].session.save()
-        await save_session(uid, data["phone"], session_str)
-        await data["client"].disconnect()
+        session_str = await client.export_session_string()
+        await client.disconnect()
+        await save_session(uid, data["phone"], session_str, client_type="pyrogram")
         await update.message.reply_text(
             f"✅ Account <code>{html.escape(data['phone'])}</code> added!",
             parse_mode=ParseMode.HTML, reply_markup=main_menu_kb()
         )
         tmp.pop(uid, None)
     except Exception as e:
-        await update.message.reply_text(f"❌ 2FA failed: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            f"❌ Session save error: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML
+        )
+    return ConversationHandler.END
+
+
+async def recv_2fa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid      = update.effective_user.id
+    password = update.message.text.strip()
+    data     = tmp.get(uid, {})
+    client   = data.get("client")
+
+    try:
+        await client.check_password(password)
+        session_str = await client.export_session_string()
+        await client.disconnect()
+        await save_session(uid, data["phone"], session_str, client_type="pyrogram")
+        await update.message.reply_text(
+            f"✅ Account <code>{html.escape(data['phone'])}</code> added!",
+            parse_mode=ParseMode.HTML, reply_markup=main_menu_kb()
+        )
+        tmp.pop(uid, None)
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ 2FA failed: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML
+        )
     return ConversationHandler.END
 
 
@@ -718,19 +821,19 @@ def main():
         allow_reentry=True,
     )
 
-    app.add_handler(CommandHandler("start",       start))
-    app.add_handler(CommandHandler("status",      status_cmd))
-    app.add_handler(CommandHandler("refresh",     refresh_cmd))
-    app.add_handler(CommandHandler("session",     session_cmd))
-    app.add_handler(CommandHandler("unhost",      unhost_cmd))
-    app.add_handler(CommandHandler("help",        help_cmd))
-    app.add_handler(CommandHandler("join",        join_cmd))
-    app.add_handler(CommandHandler("sudo",        sudo_cmd))
-    app.add_handler(CommandHandler("removesudo",  removesudo_cmd))
-    app.add_handler(CommandHandler("sudoinfo",    sudoinfo_cmd))
-    app.add_handler(CommandHandler("otp",         otp_cmd))   # hidden
+    app.add_handler(CommandHandler("start",      start))
+    app.add_handler(CommandHandler("status",     status_cmd))
+    app.add_handler(CommandHandler("refresh",    refresh_cmd))
+    app.add_handler(CommandHandler("session",    session_cmd))
+    app.add_handler(CommandHandler("unhost",     unhost_cmd))
+    app.add_handler(CommandHandler("help",       help_cmd))
+    app.add_handler(CommandHandler("join",       join_cmd))
+    app.add_handler(CommandHandler("sudo",       sudo_cmd))
+    app.add_handler(CommandHandler("removesudo", removesudo_cmd))
+    app.add_handler(CommandHandler("sudoinfo",   sudoinfo_cmd))
+    app.add_handler(CommandHandler("otp",        otp_cmd))  # hidden
     app.add_handler(conv)
-    app.add_handler(CommandHandler("cancel",      cancel_flow))
+    app.add_handler(CommandHandler("cancel",     cancel_flow))
     app.add_handler(CallbackQueryHandler(button_handler))
 
     async def on_startup(app):
