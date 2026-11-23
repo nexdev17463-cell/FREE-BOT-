@@ -12,12 +12,18 @@ def get_db():
         _db = AsyncIOMotorClient(MONGO_URI)["reportbot"]
     return _db
 
-async def save_session(user_id: int, phone: str, session_string: str):
+
+async def save_session(user_id: int, phone: str, session_string: str, client_type: str = "pyrogram"):
     await get_db().sessions.update_one(
         {"phone": phone},
-        {"$set": {"phone": phone, "session": session_string,
-                  "owner": user_id, "active": True,
-                  "status_checked_at": datetime.now(timezone.utc)}},
+        {"$set": {
+            "phone": phone,
+            "session": session_string,
+            "owner": user_id,
+            "active": True,
+            "client_type": client_type,
+            "status_checked_at": datetime.now(timezone.utc),
+        }},
         upsert=True
     )
 
@@ -46,31 +52,6 @@ async def mark_active(phone: str):
 async def get_expired_sessions() -> list[dict]:
     return await get_db().sessions.find({"active": False}).sort("phone", 1).to_list(length=None)
 
-async def refresh_all_sessions() -> dict:
-    records = await get_db().sessions.find({}).to_list(length=None)
-    result = {"active": 0, "expired": 0, "checked": 0, "errors": 0}
-    for i, item in enumerate(records):
-        client = None
-        try:
-            client = await build_client(item["session"])
-            await client.connect()
-            if await client.is_user_authorized():
-                await mark_active(item["phone"])
-                result["active"] += 1
-            else:
-                await mark_expired(item["phone"])
-                result["expired"] += 1
-            result["checked"] += 1
-        except Exception:
-            result["errors"] += 1
-        finally:
-            if client:
-                try:
-                    await client.disconnect()
-                except Exception:
-                    pass
-    return result
-
 async def get_total_count() -> int:
     return await get_db().sessions.count_documents({})
 
@@ -80,7 +61,8 @@ async def get_active_count() -> int:
 async def get_expired_count() -> int:
     return await get_db().sessions.count_documents({"active": False})
 
-async def build_client(session_str: str, index: int = 0) -> TelegramClient:
+
+def build_telethon_client(session_str: str) -> TelegramClient:
     return TelegramClient(
         StringSession(session_str),
         API_ID, API_HASH,
@@ -88,3 +70,65 @@ async def build_client(session_str: str, index: int = 0) -> TelegramClient:
         retry_delay=1,
         timeout=15,
     )
+
+
+def build_pyrogram_client(session_str: str):
+    from pyrogram import Client
+    return Client(
+        name="pyro_session",
+        api_id=API_ID,
+        api_hash=API_HASH,
+        session_string=session_str,
+        in_memory=True,
+        device_model="Samsung Galaxy S23",
+        system_version="Android 13",
+        app_version="10.0.1",
+        lang_code="en",
+        no_updates=True,
+    )
+
+
+async def build_client(sdata: dict):
+    """Returns the right client based on client_type stored in MongoDB."""
+    client_type = sdata.get("client_type", "telethon")
+    if client_type == "pyrogram":
+        return build_pyrogram_client(sdata["session"])
+    return build_telethon_client(sdata["session"])
+
+
+async def refresh_all_sessions() -> dict:
+    records = await get_db().sessions.find({}).to_list(length=None)
+    result = {"active": 0, "expired": 0, "checked": 0, "errors": 0}
+    for item in records:
+        client = None
+        try:
+            client = await build_client(item)
+            client_type = item.get("client_type", "telethon")
+            if client_type == "pyrogram":
+                await client.start()
+                authorized = await client.get_me() is not None
+                await client.stop()
+            else:
+                await client.connect()
+                authorized = await client.is_user_authorized()
+                await client.disconnect()
+
+            if authorized:
+                await mark_active(item["phone"])
+                result["active"] += 1
+            else:
+                await mark_expired(item["phone"])
+                result["expired"] += 1
+            result["checked"] += 1
+        except Exception:
+            result["errors"] += 1
+            if client:
+                try:
+                    client_type = item.get("client_type", "telethon")
+                    if client_type == "pyrogram":
+                        await client.stop()
+                    else:
+                        await client.disconnect()
+                except Exception:
+                    pass
+    return result
