@@ -497,22 +497,22 @@ async def sudo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
         await send_rich_message(
             update, ctx,
-            "<h2>🔒 OWNER ACCESS REQUIRED</h2><p>This command is reserved for the bot owner.</p>"
+            "<h1>🔒 OWNER ACCESS REQUIRED</h1><p>🛡️ This control is restricted to the verified bot owner.</p><hr/><footer>🔐 Secure administration panel</footer>"
         )
         return
     if not ctx.args or not ctx.args[0].isdigit():
         await send_rich_message(
             update, ctx,
-            "<h1>🛡️ GRANT ADMIN ACCESS</h1><p>Use this command with a valid Telegram user ID.</p>"
-            "<hr/><p><code>/sudo USER_ID</code></p>"
+            "<h1>👑 GRANT SUDO ACCESS</h1><p>➕ Add a trusted administrator to the access list.</p>"
+            "<hr/><p>⌨️ Command: <code>/sudo USER_ID</code></p><footer>🔐 Only grant access to people you trust.</footer>"
         )
         return
     user_id = int(ctx.args[0])
     await add_sudo(user_id, update.effective_user.id)
     await send_rich_message(
         update, ctx,
-        f"<h2>✓ ADMIN ACCESS GRANTED</h2><p>User ID: <code>{user_id}</code></p>"
-        "<footer>The user has been added to the sudo access list.</footer>"
+        f"<h1>💎 SUDO ACCESS GRANTED</h1><p>👤 User ID: <code>{user_id}</code></p>"
+        "<footer>✅ Administrator added to the authorized access list.</footer>"
     )
 
 
@@ -526,16 +526,16 @@ async def removesudo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not ctx.args or not ctx.args[0].isdigit():
         await send_rich_message(
             update, ctx,
-            "<h1>🛡️ REVOKE ADMIN ACCESS</h1><p>Provide the Telegram user ID to remove.</p>"
-            "<hr/><p><code>/removesudo USER_ID</code></p>"
+            "<h1>⚠️ REVOKE SUDO ACCESS</h1><p>➖ Remove an administrator from the access list.</p>"
+            "<hr/><p>⌨️ Command: <code>/removesudo USER_ID</code></p><footer>🔐 Verify the user ID before proceeding.</footer>"
         )
         return
     user_id = int(ctx.args[0])
     removed = await remove_sudo(user_id)
     if removed:
-        rich = f"<h2>✓ ADMIN ACCESS REMOVED</h2><p>User ID: <code>{user_id}</code></p>"
+        rich = f"<h1>🗑️ SUDO ACCESS REMOVED</h1><p>👤 User ID: <code>{user_id}</code></p><footer>✅ Administrator privileges have been revoked.</footer>"
     else:
-        rich = f"<h2>ⓘ ADMIN NOT FOUND</h2><p>User ID: <code>{user_id}</code> is not in the sudo list.</p>"
+        rich = f"<h1>🔎 ADMIN NOT FOUND</h1><p>👤 User ID: <code>{user_id}</code> is not in the sudo list.</p><footer>ℹ️ No access changes were made.</footer>"
     await send_rich_message(update, ctx, rich)
 
 
@@ -550,12 +550,12 @@ async def sudoinfo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         for item in rows
     )
     rich = (
-        "<h1>🔐 ACCESS DIRECTORY</h1><p><i>Owner and authorized administrators</i></p><hr/>"
-        f"<p>👑 <b>Owner</b><br/><code>{OWNER_ID}</code> · {html.escape(OWNER_USERNAME)}</p>"
-        "<h2>🛡️ SUDO USERS</h2>"
+        "<h1>💎 ACCESS DIRECTORY</h1><p><i>👑 Owner and 🛡️ authorized administrators</i></p><hr/>"
+        f"<p>👑 <b>BOT OWNER</b><br/>🆔 <code>{OWNER_ID}</code> · {html.escape(OWNER_USERNAME)}</p>"
+        "<h2>💠 SUDO ADMINISTRATORS</h2>"
         + ("<table bordered striped><tr><th>NAME</th><th>USERNAME</th><th>USER ID</th></tr>"
            + table_rows + "</table>" if table_rows else "<p>No additional sudo users are registered.</p>")
-        + f"<footer>Total sudo users: {len(rows)}</footer>"
+        + f"<footer>📊 Total authorized admins: {len(rows)}</footer>"
     )
     await send_rich_message(update, ctx, rich)
 
