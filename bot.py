@@ -358,50 +358,39 @@ async def host_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update):
         return
-    total   = await get_total_count()
-    active  = await get_active_count()
+    total = await get_total_count()
+    active = await get_active_count()
     expired = await get_expired_count()
-    text = (
-        "╔══════════════════╗\n"
-        "║   📊 BOT STATUS   ║\n"
-        "╚══════════════════╝\n\n"
-        f"🟢 Active IDs  : <code>{active}</code>\n"
-        f"🔴 Expired IDs : <code>{expired}</code>\n"
-        f"📦 Total IDs   : <code>{total}</code>"
+    rich = (
+        "<h1>📊 ACCOUNT STATUS</h1><p><i>Live session overview</i></p><hr/>"
+        "<table bordered striped><tr><th>STATUS</th><th>COUNT</th></tr>"
+        f"<tr><td>🟢 Active</td><td><b>{active}</b></td></tr>"
+        f"<tr><td>🔴 Expired</td><td><b>{expired}</b></td></tr>"
+        f"<tr><td>📦 Total</td><td><b>{total}</b></td></tr></table>"
+        "<footer>Session statistics</footer>"
     )
-    if update.callback_query:
-        await update.callback_query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=status_kb())
-    else:
-        await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=status_kb())
-
+    await send_rich_message(update, ctx, rich, status_kb(), edit=bool(update.callback_query))
 
 # ── /refresh ─────────────────────────────────────────────────────────────────
 async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update):
         return
     if update.callback_query:
-        await update.callback_query.edit_message_text("🔄 <b>Verifying sessions...</b>", parse_mode=ParseMode.HTML)
-        result = await refresh_all_sessions()
         await update.callback_query.edit_message_text(
-            f"🔄 <b>Refresh Complete</b>\n\n"
-            f"🟢 Active  : <code>{result['active']}</code>\n"
-            f"🔴 Expired : <code>{result['expired']}</code>\n"
-            f"⚠️ Errors  : <code>{result['errors']}</code>\n"
-            f"📦 Checked : <code>{result['checked']}</code>",
-            parse_mode=ParseMode.HTML, reply_markup=status_kb()
+            "🔄 <b>Verifying saved sessions…</b>", parse_mode=ParseMode.HTML
         )
     else:
-        msg = await update.effective_message.reply_text("🔄 Verifying sessions...")
-        result = await refresh_all_sessions()
-        await msg.edit_text(
-            f"🔄 <b>Refresh Complete</b>\n\n"
-            f"🟢 Active  : <code>{result['active']}</code>\n"
-            f"🔴 Expired : <code>{result['expired']}</code>\n"
-            f"⚠️ Errors  : <code>{result['errors']}</code>\n"
-            f"📦 Checked : <code>{result['checked']}</code>",
-            parse_mode=ParseMode.HTML, reply_markup=status_kb()
-        )
-
+        msg = await update.effective_message.reply_text("🔄 Verifying saved sessions…")
+    result = await refresh_all_sessions()
+    rich = (
+        "<h1>✓ REFRESH COMPLETE</h1><p><i>Session verification summary</i></p><hr/>"
+        "<table bordered striped><tr><th>RESULT</th><th>COUNT</th></tr>"
+        f"<tr><td>🟢 Active</td><td><b>{result['active']}</b></td></tr>"
+        f"<tr><td>🔴 Expired</td><td><b>{result['expired']}</b></td></tr>"
+        f"<tr><td>⚠️ Errors</td><td><b>{result['errors']}</b></td></tr>"
+        f"<tr><td>📦 Checked</td><td><b>{result['checked']}</b></td></tr></table>"
+    )
+    await send_rich_message(update, ctx, rich, status_kb())
 
 # ── /session ─────────────────────────────────────────────────────────────────
 async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -409,10 +398,17 @@ async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     from session_manager import get_user_sessions
     sessions = await get_user_sessions(update.effective_user.id)
-    lines = [f"<code>{i}. {item.get('phone','?')}</code>" for i, item in enumerate(sessions, 1)]
-    text  = "<b>📋 Your Sessions</b>\n\n" + ("\n".join(lines) if lines else "No active sessions.")
-    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb())
-
+    rows = "".join(
+        f"<tr><td>{i}</td><td><code>{html.escape(str(item.get('phone','?')))}</code></td></tr>"
+        for i, item in enumerate(sessions, 1)
+    )
+    rich = (
+        "<h1>📋 YOUR SESSIONS</h1><p><i>Saved account overview</i></p><hr/>"
+        + ("<table bordered striped><tr><th>#</th><th>PHONE</th></tr>" + rows + "</table>"
+           if rows else "<p>There are no saved sessions yet.</p>")
+        + "<footer>Only sessions linked to your account are listed here.</footer>"
+    )
+    await send_rich_message(update, ctx, rich, main_menu_kb())
 
 # ── /unhost ──────────────────────────────────────────────────────────────────
 async def unhost_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
