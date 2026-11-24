@@ -141,8 +141,8 @@ _BUTTON_CUSTOM_EMOJI_IDS = {
     "🔢": "5203993413346680064",
     "❔": "6136198451282581752",
     "📱": "5426991207731437507",
-    "✦": "6321112268142551546",
-    "✧": "6280502836962794866",
+    "⭐": "6321112268142551546",
+    "🌟": "6280502836962794866",
 }
 
 
@@ -226,6 +226,9 @@ CUSTOM_EMOJI_IDS = {
     "💠": "6325309396083543238",
     "🔢": "5203993413346680064",
     "❔": "6136198451282581752",
+    "⭐": "6280502836962794866",
+    "🌟": "6242282747629413332",
+    "📱": "5426991207731437507",
 }
 
 def apply_custom_emojis(rich_html: str) -> str:
@@ -324,12 +327,12 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await remember_user(update.effective_user)
 
     welcome_html = (
-        "<h1>✦ 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 𝗠𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 𝗕𝗢𝗧</h1>"
+        "<h1>⭐ 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 𝗠𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 𝗕𝗢𝗧</h1>"
         "<p><i>Your account management command center</i></p>"
         "<hr/>"
         "<h2>🚀 Get Started</h2>"
         "<p>Manage your connected Telegram accounts and access your available tools from one clean dashboard.</p>"
-        "<h3>✧ Quick Access</h3>"
+        "<h3>🌟 Quick Access</h3>"
         "<table bordered striped>"
         "<tr><th>SECTION</th><th>WHAT YOU CAN DO</th></tr>"
         "<tr><td><b>Accounts</b></td><td>Connect and manage accounts you own.</td></tr>"
@@ -361,7 +364,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except Exception as exc:
         logging.warning("Rich welcome unavailable; using standard message fallback: %s", exc)
         await update.effective_message.reply_text(
-            "✦ <b>WELCOME TO MASS REPORT BOT</b>\n"
+            "⭐ <b>WELCOME TO MASS REPORT BOT</b>\n"
             "<i>Your account management command center</i>\n\n"
             "🚀 <b>Get Started</b>\n"
             "Manage your connected accounts and available tools from the menu below.\n\n"
@@ -390,7 +393,7 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     rich_html = (
         "<h1>🤖 𝗠𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 𝗕𝗢𝗧</h1>"
-        "<p><i>✦ COMMAND CENTER  ·  QUICK REFERENCE ✦</i></p>"
+        "<p><i>⭐ COMMAND CENTER  ·  QUICK REFERENCE ⭐</i></p>"
         "<hr/>"
         "<h2>👤 𝗔ᴄᴄᴏᴜɴᴛ &amp; 𝗠ᴇɴᴜ</h2>"
         + rows_account
@@ -471,7 +474,7 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         logging.warning("Rich help message unavailable; using standard help fallback: %s", exc)
         fallback = (
             "🤖 <b>𝗠𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 𝗕𝗢𝗧</b>\n"
-            "<i>✦ COMMAND CENTER · QUICK REFERENCE ✦</i>\n\n"
+            "<i>⭐ COMMAND CENTER · QUICK REFERENCE ⭐</i>\n\n"
             "<b>👤 𝗔ᴄᴄᴏᴜɴᴛ &amp; 𝗠ᴇɴᴜ</b>\n"
             "<b>/start</b> — Open the bot menu\n"
             "<b>/host</b> — Connect your own account (OTP / optional 2FA)\n"
@@ -549,7 +552,7 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     def build_progress_html(index: int, total: int, latest: list, finished: bool = False):
         percent = int((index / total) * 100) if total else 100
-        title = "✦ SESSION REFRESH COMPLETE" if finished else "✦ SESSION REFRESH"
+        title = "⭐ SESSION REFRESH COMPLETE" if finished else "⭐ SESSION REFRESH"
         state = "All session checks finished" if finished else "Verifying connected sessions"
         rows = "".join(
             f"<tr><td>{icon}</td><td><code>{phone}</code></td><td><b>{label}</b></td></tr>"
@@ -620,7 +623,7 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         visible_lines = progress_lines[-6:]
         panel = build_progress_html(index, total, visible_lines)
         fallback = (
-            f"✦ SESSION REFRESH\n📊 Progress: {index}/{total}\n\n"
+            f"⭐ SESSION REFRESH\n📊 Progress: {index}/{total}\n\n"
             + "\n".join(f"{row[0]} {row[1]} — {row[2]}" for row in visible_lines)
         )
         await publish_progress(panel, fallback)
@@ -643,14 +646,14 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         for icon, label, count in summary_rows
     )
     final_html = (
-        "<h1>✦ SESSION REFRESH COMPLETE</h1>"
+        "<h1>⭐ SESSION REFRESH COMPLETE</h1>"
         "<p><i>All available session checks have finished.</i></p><hr/>"
         "<table bordered striped><tr><th>RESULT</th><th>COUNT</th></tr>"
         f"{summary_table}</table>"
         "<footer>🔐 Account numbers were kept private during verification</footer>"
     )
     final_text = (
-        "✦ SESSION REFRESH COMPLETE\n\n"
+        "⭐ SESSION REFRESH COMPLETE\n\n"
         f"🟢 Active: {result['active']}\n"
         f"🔴 Expired: {result['expired']}\n"
         f"⚠️ Errors: {result['errors']}\n"
