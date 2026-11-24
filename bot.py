@@ -75,10 +75,21 @@ async def require_access(update: Update) -> bool:
 # ── Keyboards ────────────────────────────────────────────────────────────────
 _BTN_STYLES = ["primary", "success", "danger"]
 
+# Unicode small-cap lettering inspired by the supplied button screenshot.
+# Telegram buttons do not support custom font files, so use Unicode glyphs.
+_BUTTON_SMALL_CAPS = str.maketrans({
+    "a": "ᴀ", "b": "ʙ", "c": "ᴄ", "d": "ᴅ", "e": "ᴇ",
+    "f": "ꜰ", "g": "ɢ", "h": "ʜ", "i": "ɪ", "j": "ᴊ",
+    "k": "ᴋ", "l": "ʟ", "m": "ᴍ", "n": "ɴ", "o": "ᴏ",
+    "p": "ᴘ", "q": "ꞯ", "r": "ʀ", "s": "ꜱ", "t": "ᴛ",
+    "u": "ᴜ", "v": "ᴠ", "w": "ᴡ", "x": "x", "y": "ʏ", "z": "ᴢ",
+})
+
 
 def btn(text: str, data: str) -> InlineKeyboardButton:
+    styled_text = text.translate(_BUTTON_SMALL_CAPS)
     style = random.choice(_BTN_STYLES)
-    return InlineKeyboardButton(text, callback_data=data, style=style)
+    return InlineKeyboardButton(styled_text, callback_data=data, style=style)
 
 def main_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
