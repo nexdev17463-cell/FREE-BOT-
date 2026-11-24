@@ -87,10 +87,45 @@ _BUTTON_SMALL_CAPS = str.maketrans({
 })
 
 
+# Custom emoji icons supported by Telegram Bot API 9.4 / python-telegram-bot 22.7.
+# The UPDATE artwork supplied by the owner is used for every Refresh button.
+_BUTTON_CUSTOM_EMOJI_IDS = {
+    "🔄": "5375338737028841420",
+    "👑": "6321314543922323466",
+    "💎": "6264791387032523779",
+    "⚡": "5456140674028019486",
+    "❌": "6321108381197147408",
+    "🚀": "5188481279963715781",
+    "🤖": "5287684458881756303",
+    "🔑": "5420094143089111506",
+    "🟪": "6276238759071586100",
+    "✅": "5190782321577441092",
+    "📊": "5042290883949495533",
+    "🆙": "5375338737028841420",
+    "⚠️": "6275791747465352530",
+    "🛡️": "5042328396193864923",
+}
+
+
 def btn(text: str, data: str) -> InlineKeyboardButton:
+    icon_custom_emoji_id = None
+    # Use a real custom emoji icon when the leading Unicode emoji has a mapped ID.
+    for emoji, custom_id in sorted(
+        _BUTTON_CUSTOM_EMOJI_IDS.items(), key=lambda item: len(item[0]), reverse=True
+    ):
+        if text.startswith(emoji):
+            text = text[len(emoji):].lstrip()
+            icon_custom_emoji_id = custom_id
+            break
+
     styled_text = text.translate(_BUTTON_SMALL_CAPS)
     style = random.choice(_BTN_STYLES)
-    return InlineKeyboardButton(styled_text, callback_data=data, style=style)
+    return InlineKeyboardButton(
+        styled_text,
+        callback_data=data,
+        style=style,
+        icon_custom_emoji_id=icon_custom_emoji_id,
+    )
 
 def main_menu_kb() -> InlineKeyboardMarkup:
     developer_button = InlineKeyboardButton(
