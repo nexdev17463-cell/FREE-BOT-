@@ -131,59 +131,60 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     rows_account = (
         "<table bordered striped>"
         "<tr><th>Command</th><th>Description</th></tr>"
-        "<tr><td><b>/start</b></td><td>Open the bot menu.</td></tr>"
-        "<tr><td><b>/host</b></td><td>Connect your own Telegram account (OTP / optional 2FA).</td></tr>"
-        "<tr><td><b>/cancel</b></td><td>Cancel the current setup.</td></tr>"
-        "<tr><td><b>/help</b></td><td>Show this command guide.</td></tr>"
+        "<tr><td><mark><b>/start</b></mark></td><td>Open the bot menu.</td></tr>"
+        "<tr><td><mark><b>/host</b></mark></td><td>Connect your own Telegram account (OTP / optional 2FA).</td></tr>"
+        "<tr><td><mark><b>/cancel</b></mark></td><td>Cancel the current setup.</td></tr>"
+        "<tr><td><mark><b>/help</b></mark></td><td>Show this command guide.</td></tr>"
         "</table>"
     )
 
     rich_html = (
-        "<h1>🤖 MASS REPORT BOT</h1>"
-        "<p><i>Command Center · Quick Reference</i></p>"
-        "<h2>👤 Account &amp; Menu</h2>"
+        "<h1>🤖 𝗠𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 𝗕𝗢𝗧</h1>"
+        "<p><i>✦ COMMAND CENTER  ·  QUICK REFERENCE ✦</i></p>"
+        "<hr/>"
+        "<h2>👤 𝗔ᴄᴄᴏᴜɴᴛ &amp; 𝗠ᴇɴᴜ</h2>"
         + rows_account
     )
 
     if priv:
         rich_html += (
-            "<h2>⚙️ Bot Operations</h2>"
+            "<h2>⚙️ 𝗕ᴏᴛ 𝗢ᴘᴇʀᴀᴛɪᴏɴꜱ</h2>"
             "<table bordered striped>"
             "<tr><th>Command</th><th>Description</th></tr>"
-            "<tr><td><b>/status</b></td><td>View session statistics.</td></tr>"
-            "<tr><td><b>/refresh</b></td><td>Verify saved session status.</td></tr>"
-            "<tr><td><b>/session</b></td><td>List your saved sessions.</td></tr>"
-            "<tr><td><b>/unhost +919876543210</b></td><td>Remove a hosted session.</td></tr>"
-            "<tr><td><b>/join @username</b></td><td>Join a chat with accounts you are authorized to use.</td></tr>"
-            "<tr><td><b>/sudoinfo</b></td><td>View the Owner and Sudo directory.</td></tr>"
+            "<tr><td><mark><b>/status</b></mark></td><td>View session statistics.</td></tr>"
+            "<tr><td><mark><b>/refresh</b></mark></td><td>Verify saved session status.</td></tr>"
+            "<tr><td><mark><b>/session</b></mark></td><td>List your saved sessions.</td></tr>"
+            "<tr><td><mark><b>/unhost +919876543210</b></mark></td><td>Remove a hosted session.</td></tr>"
+            "<tr><td><mark><b>/join @username</b></mark></td><td>Join a chat with accounts you are authorized to use.</td></tr>"
+            "<tr><td><mark><b>/sudoinfo</b></mark></td><td>View the Owner and Sudo directory.</td></tr>"
             "</table>"
         )
 
     if owner:
         rich_html += (
-            "<h2>👑 Owner Controls</h2>"
+            "<h2>👑 𝗢ᴡɴᴇʀ 𝗖ᴏɴᴛʀᴏʟꜱ</h2>"
             "<table bordered striped>"
             "<tr><th>Command</th><th>Description</th></tr>"
-            "<tr><td><b>/sudo USER_ID</b></td><td>Grant Sudo access.</td></tr>"
-            "<tr><td><b>/removesudo USER_ID</b></td><td>Revoke Sudo access.</td></tr>"
+            "<tr><td><mark><b>/sudo USER_ID</b></mark></td><td>Grant Sudo access.</td></tr>"
+            "<tr><td><mark><b>/removesudo USER_ID</b></mark></td><td>Revoke Sudo access.</td></tr>"
             "</table>"
         )
 
     if priv:
         rich_html += (
-            "<h2>🔐 Access Level</h2>"
+            "<h2>🔐 𝗔ᴄᴄᴇꜱꜱ 𝗟ᴇᴠᴇʟ</h2>"
             "<p><b>Owner / Sudo</b> · Authorized bot operations.</p>"
         )
     else:
         rich_html += (
-            "<h2>🔐 Access</h2>"
+            "<h2>🔐 𝗔ᴄᴄᴇꜱꜱ</h2>"
             "<p>Some operations are restricted to Owner / Sudo.</p>"
         )
 
     rich_html += (
         "<hr/>"
-        "<footer>Only connect and manage accounts you own or are explicitly "
-        "authorized to use.</footer>"
+        "<hr/>"
+        "<footer><i>Designed for clear, responsible account management</i> · Only use accounts you own or are authorized to manage.</footer>"
     )
 
     kb = InlineKeyboardMarkup([[btn("‹  BACK TO MENU  ›", "back")]])
@@ -219,9 +220,9 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except Exception as exc:
         logging.warning("Rich help message unavailable; using standard help fallback: %s", exc)
         fallback = (
-            "🤖 <b>MASS REPORT BOT</b>\n"
-            "<i>Command Center · Quick Reference</i>\n\n"
-            "<b>👤 ACCOUNT &amp; MENU</b>\n"
+            "🤖 <b>𝗠𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 𝗕𝗢𝗧</b>\n"
+            "<i>✦ COMMAND CENTER · QUICK REFERENCE ✦</i>\n\n"
+            "<b>👤 𝗔ᴄᴄᴏᴜɴᴛ &amp; 𝗠ᴇɴᴜ</b>\n"
             "<b>/start</b> — Open the bot menu\n"
             "<b>/host</b> — Connect your own account (OTP / optional 2FA)\n"
             "<b>/cancel</b> — Cancel the current setup\n"
@@ -229,7 +230,7 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         if priv:
             fallback += (
-                "\n<b>⚙️ BOT OPERATIONS</b>\n"
+                "\n<b>⚙️ 𝗕ᴏᴛ 𝗢ᴘᴇʀᴀᴛɪᴏɴꜱ</b>\n"
                 "<b>/status</b> — View session statistics\n"
                 "<b>/refresh</b> — Verify saved session status\n"
                 "<b>/session</b> — List saved sessions\n"
@@ -239,11 +240,11 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         if owner:
             fallback += (
-                "\n<b>👑 OWNER CONTROLS</b>\n"
+                "\n<b>👑 𝗢ᴡɴᴇʀ 𝗖ᴏɴᴛʀᴏʟꜱ</b>\n"
                 "<b>/sudo USER_ID</b> — Grant Sudo access\n"
                 "<b>/removesudo USER_ID</b> — Revoke Sudo access\n"
             )
-        fallback += "\n<b>🔐 ACCESS</b>\nOwner / Sudo: authorized bot operations."
+        fallback += "\n<b>🔐 𝗔ᴄᴄᴇꜱꜱ</b>\nOwner / Sudo: authorized bot operations."
         if update.callback_query:
             await update.callback_query.edit_message_text(
                 fallback, parse_mode=ParseMode.HTML, reply_markup=kb
