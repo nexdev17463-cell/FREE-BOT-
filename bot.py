@@ -234,6 +234,17 @@ def apply_custom_emojis(rich_html: str) -> str:
         )
     return rich_html
 
+# Extra artwork is scoped to public welcome/help panels only.
+# It is not applied to report, join, or account-authentication flows.
+def apply_info_custom_emojis(rich_html: str, emoji_ids: dict) -> str:
+    for emoji, custom_id in sorted(emoji_ids.items(), key=lambda item: len(item[0]), reverse=True):
+        rich_html = rich_html.replace(
+            emoji,
+            f'<tg-emoji emoji-id="{custom_id}">{emoji}</tg-emoji>'
+        )
+    return rich_html
+
+
 # ── Premium message presentation (UI only) ───────────────────────────────────
 async def send_rich_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
                             rich_html: str, reply_markup=None, edit: bool = False):
@@ -329,7 +340,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "<h3>✧ Quick Access</h3>"
         "<table bordered striped>"
         "<tr><th>SECTION</th><th>WHAT YOU CAN DO</th></tr>"
-        "<tr><td><b>Accounts</b></td><td>Connect and manage accounts you own.</td></tr>"
+        "<tr><td>📱 <b>Accounts</b></td><td>Connect and manage accounts you own.</td></tr>"
         "<tr><td><b>Sessions</b></td><td>Review saved sessions and their status.</td></tr>"
         "<tr><td><b>Tools</b></td><td>Open the tools available to your access level.</td></tr>"
         "<tr><td><b>Help Center</b></td><td>Read commands and usage guidance.</td></tr>"
@@ -342,7 +353,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     api_url = f"https://api.telegram.org/bot{ctx.bot.token}/sendRichMessage"
     payload = {
         "chat_id": update.effective_chat.id,
-        "rich_message": {"html": apply_custom_emojis(welcome_html)},
+        "rich_message": {"html": apply_info_custom_emojis(welcome_html, { "✦": "6321112268142551546", "✧": "6280502836962794866", "📱": "5426991207731437507" })},
         "reply_markup": keyboard.to_dict(),
     }
 
@@ -389,7 +400,7 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "<h1>🤖 𝗠𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 𝗕𝗢𝗧</h1>"
         "<p><i>✦ COMMAND CENTER  ·  QUICK REFERENCE ✦</i></p>"
         "<hr/>"
-        "<h2>👤 𝗔ᴄᴄᴏᴜɴᴛ &amp; 𝗠ᴇɴᴜ</h2>"
+        "<h2>📱 𝗔ᴄᴄᴏᴜɴᴛ &amp; 𝗠ᴇɴᴜ</h2>"
         + rows_account
     )
 
@@ -444,14 +455,14 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             payload = {
                 "chat_id": chat_id,
                 "message_id": update.callback_query.message.message_id,
-                "rich_message": {"html": apply_custom_emojis(rich_html)},
+                "rich_message": {"html": apply_info_custom_emojis(rich_html, { "✦": "6242282747629413332", "📱": "5426991207731437507" })},
                 "reply_markup": kb.to_dict(),
             }
         else:
             method = "sendRichMessage"
             payload = {
                 "chat_id": chat_id,
-                "rich_message": {"html": apply_custom_emojis(rich_html)},
+                "rich_message": {"html": apply_info_custom_emojis(rich_html, { "✦": "6242282747629413332", "📱": "5426991207731437507" })},
                 "reply_markup": kb.to_dict(),
             }
 
