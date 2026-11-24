@@ -93,15 +93,11 @@ def btn(text: str, data: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(styled_text, callback_data=data, style=style)
 
 def main_menu_kb() -> InlineKeyboardMarkup:
-    developer = (OWNER_USERNAME or "").strip().lstrip("@")
-    if developer and re.fullmatch(r"[A-Za-z0-9_]{5,32}", developer):
-        developer_button = InlineKeyboardButton(
-            "◈ 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ◈",
-            url=f"https://t.me/{developer}",
-            style="danger",
-        )
-    else:
-        developer_button = btn("◈ 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ◈", "developer")
+    developer_button = InlineKeyboardButton(
+        "◈ 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ◈",
+        url="https://t.me/SAREEF_FUCKER",
+        style="danger",
+    )
 
     return InlineKeyboardMarkup([
         [btn("➕ Add Account", "add_account"), btn("📊 Status", "status")],
