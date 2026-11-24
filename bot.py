@@ -148,6 +148,20 @@ _BUTTON_CUSTOM_EMOJI_IDS = {
     "📱": "5426991207731437507",
     "⭐": "6280502836962794866",
     "🌟": "6242282747629413332",
+    # ── Added emoji IDs ──────────────────────────────────────────────────────
+    "⏳": "5386367538735104399",
+    "🚫": "6098120323503235997",
+    "🕐": "5400258343438655703",
+    "😤": "5452056954698475544",
+    "👶": "5454407470040491470",
+    "🔪": "5258061163203148267",
+    "🔞": "5472183128497862606",
+    "🧾": "6289752212243483195",
+    "💸": "5949785441728205181",
+    "©️": "5458496841547015692",
+    "📂": "5167958401510016217",
+    "📡": "6093607322192455111",
+    "🔎": "5348282577662778261",
 }
 
 
@@ -240,6 +254,20 @@ CUSTOM_EMOJI_IDS = {
     "⭐": "6280502836962794866",
     "🌟": "6242282747629413332",
     "📱": "5426991207731437507",
+    # ── Added emoji IDs ────────────────────────────────────────────────────
+    "⏳": "5386367538735104399",
+    "🚫": "6098120323503235997",
+    "🕐": "5400258343438655703",
+    "😤": "5452056954698475544",
+    "👶": "5454407470040491470",
+    "🔪": "5258061163203148267",
+    "🔞": "5472183128497862606",
+    "🧾": "6289752212243483195",
+    "💸": "5949785441728205181",
+    "©️": "5458496841547015692",
+    "📂": "5167958401510016217",
+    "📡": "6093607322192455111",
+    "🔎": "5348282577662778261",
 }
 
 def apply_custom_emojis(rich_html: str) -> str:
@@ -331,6 +359,42 @@ async def _rich_edit_by_id(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
             )
         except Exception as exc2:
             logging.warning("Fallback edit also failed: %s", exc2)
+
+
+# ── Rich send helper (returns message_id; HTML fallback) ─────────────────────
+async def _rich_send_new(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
+                         rich_html: str, reply_markup=None,
+                         fallback_text: str = None, fallback_markup=None) -> int:
+    """Send a new Rich Message and return the message_id; HTML fallback on failure."""
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    payload = {
+        "chat_id": chat_id,
+        "rich_message": {"html": apply_custom_emojis(rich_html)},
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup.to_dict()
+    try:
+        timeout = aiohttp.ClientTimeout(total=20)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(api_base + "sendRichMessage", json=payload) as response:
+                result = await response.json(content_type=None)
+                if not response.ok or not result.get("ok"):
+                    raise RuntimeError(result.get("description", "rich send failed"))
+                logging.info("Rich Message sent (new) successfully, message_id=%s",
+                             result["result"]["message_id"])
+                return result["result"]["message_id"]
+    except Exception as exc:
+        logging.warning("Rich send (new) unavailable; using HTML fallback: %s", exc)
+
+    if fallback_text is not None:
+        msg = await ctx.bot.send_message(
+            chat_id=chat_id,
+            text=fallback_text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=fallback_markup,
+        )
+        return msg.message_id
+    return None
 
 
 # ── /start ───────────────────────────────────────────────────────────────────
@@ -773,14 +837,29 @@ async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    total = len(sessions)
-    msg   = await update.effective_message.reply_text(
+    total    = len(sessions)
+    chat_id  = update.effective_chat.id
+    join_initial_rich = (
+        "<h2>⏳ JOIN IN PROGRESS</h2>"
+        f"<p><i>Target: <code>{html.escape(target)}</code></i></p><hr/>"
+        "<table bordered striped>"
+        "<tr><th>RESULT</th><th>COUNT</th></tr>"
+        "<tr><td>✅ Joined</td><td><b>0</b></td></tr>"
+        "<tr><td>🔄 Already</td><td><b>0</b></td></tr>"
+        "<tr><td>❌ Failed</td><td><b>0</b></td></tr>"
+        f"<tr><td>📊 Done</td><td><b>0 / {total}</b></td></tr>"
+        "</table>"
+    )
+    join_initial_fallback = (
         f"⏳ <b>Joining</b> <code>{html.escape(target)}</code>\n\n"
         f"✅ Joined  : <code>0</code>\n"
         f"🔄 Already : <code>0</code>\n"
         f"❌ Failed  : <code>0</code>\n"
-        f"📊 Done    : <code>0 / {total}</code>",
-        parse_mode=ParseMode.HTML
+        f"📊 Done    : <code>0 / {total}</code>"
+    )
+    msg_id = await _rich_send_new(
+        ctx, chat_id, join_initial_rich, None,
+        join_initial_fallback
     )
 
     last = {"t": 0}
@@ -791,13 +870,17 @@ async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if now - last["t"] >= 1 or done >= total:
             last["t"] = now
             try:
-                await msg.edit_text(
-                    f"⏳ <b>Joining</b> <code>{html.escape(target)}</code>\n\n"
-                    f"✅ Joined  : <code>{r['joined']}</code>\n"
-                    f"🔄 Already : <code>{r['already']}</code>\n"
-                    f"❌ Failed  : <code>{r['failed']}</code>\n"
-                    f"📊 Done    : <code>{done} / {total}</code>",
-                    parse_mode=ParseMode.HTML
+                await ctx.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    text=(
+                        f"⏳ <b>Joining</b> <code>{html.escape(target)}</code>\n\n"
+                        f"✅ Joined  : <code>{r['joined']}</code>\n"
+                        f"🔄 Already : <code>{r['already']}</code>\n"
+                        f"❌ Failed  : <code>{r['failed']}</code>\n"
+                        f"📊 Done    : <code>{done} / {total}</code>"
+                    ),
+                    parse_mode=ParseMode.HTML,
                 )
             except Exception:
                 pass
@@ -827,7 +910,7 @@ async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"👥 Total   : <code>{total}</code>"
     )
     await _rich_edit_by_id(
-        ctx, update.effective_chat.id, msg.message_id,
+        ctx, chat_id, msg_id,
         rich_done, main_menu_kb(),
         fallback_done, main_menu_kb()
     )
@@ -921,8 +1004,13 @@ async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    msg = await update.effective_message.reply_text(
-        f"⏳ Fetching OTP for <code>{html.escape(phone)}</code>...", parse_mode=ParseMode.HTML
+    otp_chat_id = update.effective_chat.id
+    msg_id = await _rich_send_new(
+        ctx, otp_chat_id,
+        "<h2>⏳ FETCHING OTP</h2>"
+        f"<p>Looking up latest OTP for <code>{html.escape(phone)}</code>…</p>",
+        None,
+        f"⏳ Fetching OTP for <code>{html.escape(phone)}</code>..."
     )
 
     try:
@@ -937,7 +1025,7 @@ async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             me = await client.get_me()
             if not me:
                 await _rich_edit_by_id(
-                    ctx, update.effective_chat.id, msg.message_id,
+                    ctx, otp_chat_id, msg_id,
                     f"<h2>❌ SESSION EXPIRED</h2><p><code>{html.escape(phone)}</code> session is no longer valid.</p>",
                     None,
                     f"❌ Session for <code>{html.escape(phone)}</code> is expired.",
@@ -950,7 +1038,7 @@ async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await client.stop()
             if not messages:
                 await _rich_edit_by_id(
-                    ctx, update.effective_chat.id, msg.message_id,
+                    ctx, otp_chat_id, msg_id,
                     "<h2>❌ NO OTP FOUND</h2><p>No OTP message was found in the inbox.</p>",
                     None, "❌ No OTP message found."
                 )
@@ -962,7 +1050,7 @@ async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await client.connect()
             if not await client.is_user_authorized():
                 await _rich_edit_by_id(
-                    ctx, update.effective_chat.id, msg.message_id,
+                    ctx, otp_chat_id, msg_id,
                     f"<h2>❌ SESSION EXPIRED</h2><p><code>{html.escape(phone)}</code> session is no longer valid.</p>",
                     None,
                     f"❌ Session for <code>{html.escape(phone)}</code> is expired.",
@@ -973,7 +1061,7 @@ async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await client.disconnect()
             if not tg_msgs:
                 await _rich_edit_by_id(
-                    ctx, update.effective_chat.id, msg.message_id,
+                    ctx, otp_chat_id, msg_id,
                     "<h2>❌ NO OTP FOUND</h2><p>No OTP message was found in the inbox.</p>",
                     None, "❌ No OTP message found."
                 )
@@ -994,12 +1082,12 @@ async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"🕐 <code>{date_str}</code>"
         )
         await _rich_edit_by_id(
-            ctx, update.effective_chat.id, msg.message_id,
+            ctx, otp_chat_id, msg_id,
             otp_rich, None, otp_fallback
         )
     except Exception as e:
         await _rich_edit_by_id(
-            ctx, update.effective_chat.id, msg.message_id,
+            ctx, otp_chat_id, msg_id,
             f"<h2>❌ ERROR</h2><p><code>{html.escape(str(e))}</code></p>",
             None,
             f"❌ Error: <code>{html.escape(str(e))}</code>"
@@ -1219,13 +1307,28 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             edit=True
         )
 
-        sent_msg = await q.message.reply_text(
+        report_chat_id = update.effective_chat.id
+        report_initial_rich = (
+            "<h2>📡 REPORTING IN PROGRESS</h2>"
+            f"<p><i>Target: <code>{html.escape(target)}</code></i></p><hr/>"
+            "<table bordered striped>"
+            "<tr><th>RESULT</th><th>COUNT</th></tr>"
+            "<tr><td>✅ Success</td><td><b>0</b></td></tr>"
+            "<tr><td>❌ Failed</td><td><b>0</b></td></tr>"
+            "<tr><td>🔴 Expired</td><td><b>0</b></td></tr>"
+            f"<tr><td>📊 Done</td><td><b>0 / {total_expected}</b></td></tr>"
+            "</table>"
+        )
+        report_initial_fallback = (
             f"📡 <b>Reporting in progress...</b>\n\n"
             f"✅ Success : <code>0</code>\n"
             f"❌ Failed  : <code>0</code>\n"
             f"🔴 Expired : <code>0</code>\n"
-            f"📊 Done    : <code>0 / {total_expected}</code>",
-            parse_mode=ParseMode.HTML
+            f"📊 Done    : <code>0 / {total_expected}</code>"
+        )
+        sent_msg_id = await _rich_send_new(
+            ctx, report_chat_id, report_initial_rich, None,
+            report_initial_fallback
         )
 
         last = {"t": 0}
@@ -1236,13 +1339,17 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if now - last["t"] >= 1 or done >= total_expected:
                 last["t"] = now
                 try:
-                    await sent_msg.edit_text(
-                        f"📡 <b>Reporting in progress...</b>\n\n"
-                        f"✅ Success : <code>{r['success']}</code>\n"
-                        f"❌ Failed  : <code>{r['failed']}</code>\n"
-                        f"🔴 Expired : <code>{r['expired']}</code>\n"
-                        f"📊 Done    : <code>{done} / {total_expected}</code>",
-                        parse_mode=ParseMode.HTML
+                    await ctx.bot.edit_message_text(
+                        chat_id=report_chat_id,
+                        message_id=sent_msg_id,
+                        text=(
+                            f"📡 <b>Reporting in progress...</b>\n\n"
+                            f"✅ Success : <code>{r['success']}</code>\n"
+                            f"❌ Failed  : <code>{r['failed']}</code>\n"
+                            f"🔴 Expired : <code>{r['expired']}</code>\n"
+                            f"📊 Done    : <code>{done} / {total_expected}</code>"
+                        ),
+                        parse_mode=ParseMode.HTML,
                     )
                 except Exception:
                     pass
@@ -1291,7 +1398,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"{err_line}"
         )
         await _rich_edit_by_id(
-            ctx, update.effective_chat.id, sent_msg.message_id,
+            ctx, report_chat_id, sent_msg_id,
             rich_done, main_menu_kb(),
             fallback_done, main_menu_kb()
         )
