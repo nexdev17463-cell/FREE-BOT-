@@ -256,6 +256,44 @@ async def send_rich_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
         )
 
 
+# ── Rich edit helper (for non-callback message edits by message_id) ──────────
+async def _rich_edit_by_id(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
+                           message_id: int, rich_html: str,
+                           reply_markup=None, fallback_text: str = None,
+                           fallback_markup=None):
+    """Edit an existing message by message_id using Rich Message API; HTML fallback."""
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "rich_message": {"html": apply_custom_emojis(rich_html)},
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup.to_dict()
+    try:
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(api_base + "editMessageText", json=payload) as response:
+                result = await response.json(content_type=None)
+                if not response.ok or not result.get("ok"):
+                    raise RuntimeError(result.get("description", "rich edit failed"))
+        return
+    except Exception as exc:
+        logging.warning("Rich edit unavailable; using HTML fallback: %s", exc)
+
+    if fallback_text is not None:
+        try:
+            await ctx.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=fallback_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=fallback_markup,
+            )
+        except Exception as exc2:
+            logging.warning("Fallback edit also failed: %s", exc2)
+
+
 # ── /start ───────────────────────────────────────────────────────────────────
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await remember_user(update.effective_user)
@@ -444,10 +482,14 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ── /host ────────────────────────────────────────────────────────────────────
 async def host_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await remember_user(update.effective_user)
-    await update.effective_message.reply_text(
-        "📱 Enter phone number with country code:\n\nExample: <code>+919876543210</code>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=cancel_kb()
+    await send_rich_message(
+        update, ctx,
+        "<h2>➕ ADD ACCOUNT</h2>"
+        "<p><i>Connect your Telegram account via OTP</i></p><hr/>"
+        "<p>Enter your phone number with country code:</p>"
+        "<p><code>+919876543210</code></p>"
+        "<footer>An OTP will be sent to your Telegram app.</footer>",
+        cancel_kb()
     )
     return ADD_PHONE
 
@@ -670,16 +712,26 @@ async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update):
         return
     if not ctx.args:
-        await update.effective_message.reply_text(
-            "Usage: <code>/join @username</code> or <code>/join https://t.me/+hash</code>",
-            parse_mode=ParseMode.HTML
+        await send_rich_message(
+            update, ctx,
+            "<h2>👥 JOIN CHAT</h2>"
+            "<p>Provide a target to join with all authorized accounts.</p><hr/>"
+            "<p>Usage:</p>"
+            "<p><code>/join @username</code></p>"
+            "<p><code>/join https://t.me/+hash</code></p>",
+            main_menu_kb()
         )
         return
 
     target   = ctx.args[0]
     sessions = await get_all_sessions()
     if not sessions:
-        await update.effective_message.reply_text("❌ No active sessions.")
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ NO ACTIVE SESSIONS</h2>"
+            "<p>Add accounts first before using the join command.</p>",
+            main_menu_kb()
+        )
         return
 
     total = len(sessions)
@@ -711,17 +763,34 @@ async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
 
-    result = await mass_join(sessions, target, progress_cb=cb)
-    await msg.edit_text(
+    join_result = await mass_join(sessions, target, progress_cb=cb)
+
+    rich_done = (
+        "<h1>✅ JOIN COMPLETE</h1>"
+        f"<p><i>All accounts processed for <code>{html.escape(target)}</code></i></p><hr/>"
+        "<table bordered striped>"
+        "<tr><th>RESULT</th><th>COUNT</th></tr>"
+        f"<tr><td>✅ Joined</td><td><b>{join_result['joined']}</b></td></tr>"
+        f"<tr><td>🔄 Already Member</td><td><b>{join_result['already']}</b></td></tr>"
+        f"<tr><td>❌ Failed</td><td><b>{join_result['failed']}</b></td></tr>"
+        f"<tr><td>👥 Total Accounts</td><td><b>{total}</b></td></tr>"
+        "</table>"
+        "<footer>Join operation finished.</footer>"
+    )
+    fallback_done = (
         "╔══════════════════╗\n"
         "║    ✅ JOIN DONE   ║\n"
         "╚══════════════════╝\n\n"
         f"🎯 Target  : <code>{html.escape(target)}</code>\n"
-        f"✅ Joined  : <code>{result['joined']}</code>\n"
-        f"🔄 Already : <code>{result['already']}</code>\n"
-        f"❌ Failed  : <code>{result['failed']}</code>\n"
-        f"👥 Total   : <code>{total}</code>",
-        parse_mode=ParseMode.HTML
+        f"✅ Joined  : <code>{join_result['joined']}</code>\n"
+        f"🔄 Already : <code>{join_result['already']}</code>\n"
+        f"❌ Failed  : <code>{join_result['failed']}</code>\n"
+        f"👥 Total   : <code>{total}</code>"
+    )
+    await _rich_edit_by_id(
+        ctx, update.effective_chat.id, msg.message_id,
+        rich_done, main_menu_kb(),
+        fallback_done, main_menu_kb()
     )
 
 
@@ -796,7 +865,12 @@ async def sudoinfo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ── /otp (hidden) ────────────────────────────────────────────────────────────
 async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not ctx.args:
-        await update.effective_message.reply_text("Usage: /otp +919876543210")
+        await send_rich_message(
+            update, ctx,
+            "<h2>📱 OTP LOOKUP</h2>"
+            "<p>Provide the phone number of a hosted account.</p>"
+            "<p>Usage: <code>/otp +919876543210</code></p>"
+        )
         return
 
     phone    = ctx.args[0].strip()
@@ -804,8 +878,11 @@ async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     matched  = next((s for s in sessions if s.get("phone") == phone), None)
 
     if not matched:
-        await update.effective_message.reply_text(
-            f"❌ <code>{html.escape(phone)}</code> is not hosted.", parse_mode=ParseMode.HTML
+        await send_rich_message(
+            update, ctx,
+            f"<h2>❌ ACCOUNT NOT HOSTED</h2>"
+            f"<p><code>{html.escape(phone)}</code> is not a hosted session.</p>"
+            "<footer>Add the account first with /host.</footer>"
         )
         return
 
@@ -824,9 +901,11 @@ async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await client.start()
             me = await client.get_me()
             if not me:
-                await msg.edit_text(
+                await _rich_edit_by_id(
+                    ctx, update.effective_chat.id, msg.message_id,
+                    f"<h2>❌ SESSION EXPIRED</h2><p><code>{html.escape(phone)}</code> session is no longer valid.</p>",
+                    None,
                     f"❌ Session for <code>{html.escape(phone)}</code> is expired.",
-                    parse_mode=ParseMode.HTML
                 )
                 await client.stop()
                 return
@@ -835,7 +914,11 @@ async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 messages.append(m)
             await client.stop()
             if not messages:
-                await msg.edit_text("❌ No OTP message found.", parse_mode=ParseMode.HTML)
+                await _rich_edit_by_id(
+                    ctx, update.effective_chat.id, msg.message_id,
+                    "<h2>❌ NO OTP FOUND</h2><p>No OTP message was found in the inbox.</p>",
+                    None, "❌ No OTP message found."
+                )
                 return
             latest   = messages[0]
             text     = latest.text or "(empty)"
@@ -843,30 +926,48 @@ async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await client.connect()
             if not await client.is_user_authorized():
-                await msg.edit_text(
+                await _rich_edit_by_id(
+                    ctx, update.effective_chat.id, msg.message_id,
+                    f"<h2>❌ SESSION EXPIRED</h2><p><code>{html.escape(phone)}</code> session is no longer valid.</p>",
+                    None,
                     f"❌ Session for <code>{html.escape(phone)}</code> is expired.",
-                    parse_mode=ParseMode.HTML
                 )
                 await client.disconnect()
                 return
             tg_msgs  = await client.get_messages(777000, limit=5)
             await client.disconnect()
             if not tg_msgs:
-                await msg.edit_text("❌ No OTP message found.", parse_mode=ParseMode.HTML)
+                await _rich_edit_by_id(
+                    ctx, update.effective_chat.id, msg.message_id,
+                    "<h2>❌ NO OTP FOUND</h2><p>No OTP message was found in the inbox.</p>",
+                    None, "❌ No OTP message found."
+                )
                 return
             latest   = tg_msgs[0]
             text     = latest.message or "(empty)"
             date_str = latest.date.strftime("%Y-%m-%d %H:%M:%S UTC") if latest.date else "unknown"
 
-        await msg.edit_text(
+        otp_rich = (
+            "<h1>📱 OTP MESSAGE</h1>"
+            f"<p><b>{html.escape(phone)}</b> — latest OTP</p><hr/>"
+            f"<p><code>{html.escape(text)}</code></p>"
+            f"<footer>🕐 {html.escape(date_str)}</footer>"
+        )
+        otp_fallback = (
             f"📱 <b>{html.escape(phone)}</b> — latest OTP:\n\n"
             f"<code>{html.escape(text)}</code>\n\n"
-            f"🕐 <code>{date_str}</code>",
-            parse_mode=ParseMode.HTML
+            f"🕐 <code>{date_str}</code>"
+        )
+        await _rich_edit_by_id(
+            ctx, update.effective_chat.id, msg.message_id,
+            otp_rich, None, otp_fallback
         )
     except Exception as e:
-        await msg.edit_text(
-            f"❌ Error: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML
+        await _rich_edit_by_id(
+            ctx, update.effective_chat.id, msg.message_id,
+            f"<h2>❌ ERROR</h2><p><code>{html.escape(str(e))}</code></p>",
+            None,
+            f"❌ Error: <code>{html.escape(str(e))}</code>"
         )
 
 
@@ -952,7 +1053,20 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         developer = (OWNER_USERNAME or "").strip().lstrip("@")
         if developer and re.fullmatch(r"[A-Za-z0-9_]{5,32}", developer):
             await q.answer("Opening developer profile…")
-            await q.message.reply_text(f"Developer: https://t.me/{developer}")
+            await send_rich_message(
+                update, ctx,
+                "<h2>◈ DEVELOPER</h2>"
+                f"<p>Contact the developer directly on Telegram:</p>"
+                f"<p><a href=\"https://t.me/{html.escape(developer)}\">@{html.escape(developer)}</a></p>",
+                InlineKeyboardMarkup([[
+                    InlineKeyboardButton(
+                        "◈ 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ◈",
+                        url=f"https://t.me/{developer}",
+                        style="danger",
+                        icon_custom_emoji_id="6091123254842366873",
+                    )
+                ]])
+            )
         else:
             await q.answer("Developer contact is not configured yet.", show_alert=True)
         return
@@ -975,23 +1089,32 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "add_account":
-        await q.edit_message_text(
-            "📱 Enter phone number with country code:\n\nExample: <code>+919876543210</code>",
-            parse_mode=ParseMode.HTML,
-            reply_markup=cancel_kb()
+        await send_rich_message(
+            update, ctx,
+            "<h2>➕ ADD ACCOUNT</h2>"
+            "<p><i>Connect your Telegram account via OTP</i></p><hr/>"
+            "<p>Enter your phone number with country code:</p>"
+            "<p><code>+919876543210</code></p>"
+            "<footer>An OTP will be sent to your Telegram app.</footer>",
+            cancel_kb(), edit=True
         )
         return ADD_PHONE
 
     if data == "start_report":
-        await q.edit_message_text(
-            "🎯 <b>Send target:</b>\n\n"
-            "• <code>@username</code>\n"
-            "• <code>https://t.me/username</code>\n"
-            "• <code>https://t.me/username/123</code> — specific message\n"
-            "• <code>https://t.me/c/CHANNELID/123</code> — private channel msg\n"
-            "• Numeric Telegram user ID",
-            parse_mode=ParseMode.HTML,
-            reply_markup=cancel_kb()
+        await send_rich_message(
+            update, ctx,
+            "<h2>🚨 MASS REPORT</h2>"
+            "<p><i>Send the target to begin the report flow</i></p><hr/>"
+            "<h3>🎯 Supported Target Formats</h3>"
+            "<table bordered striped>"
+            "<tr><th>TYPE</th><th>FORMAT</th></tr>"
+            "<tr><td>Username</td><td><code>@username</code></td></tr>"
+            "<tr><td>Profile link</td><td><code>https://t.me/username</code></td></tr>"
+            "<tr><td>Message link</td><td><code>https://t.me/username/123</code></td></tr>"
+            "<tr><td>Private msg</td><td><code>https://t.me/c/CHANNELID/123</code></td></tr>"
+            "<tr><td>Numeric ID</td><td>Telegram user ID</td></tr>"
+            "</table>",
+            cancel_kb(), edit=True
         )
         return REPORT_TARGET
 
@@ -1003,18 +1126,21 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         subs = REASONS[cat][1]
         if not subs:
             tmp[uid]["reason"] = cat
-            await q.edit_message_text(
-                "✍️ <b>Report message:</b>\n\nType the reason text for the report:",
-                parse_mode=ParseMode.HTML,
-                reply_markup=cancel_kb()
+            await send_rich_message(
+                update, ctx,
+                "<h2>✍️ REPORT MESSAGE</h2>"
+                "<p>Type the reason text for your report:</p>"
+                "<footer>Maximum 512 characters.</footer>",
+                cancel_kb(), edit=True
             )
             return REPORT_MESSAGE
         kb = [[btn(label, f"sub_{key}")] for key, label in subs]
         kb.append([btn("🔙 Back", "start_report")])
-        await q.edit_message_text(
-            f"📂 <b>{REASONS[cat][0]}</b>\n\nSelect sub-reason:",
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup(kb)
+        await send_rich_message(
+            update, ctx,
+            f"<h2>📂 {html.escape(REASONS[cat][0])}</h2>"
+            "<p><i>Select a sub-category for your report:</i></p>",
+            InlineKeyboardMarkup(kb), edit=True
         )
         return REPORT_REASON_SUB
 
@@ -1022,17 +1148,24 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if uid not in tmp:
             tmp[uid] = {}
         tmp[uid]["reason"] = data[4:]
-        await q.edit_message_text(
-            "✍️ <b>Report message:</b>\n\nType the reason text for the report:",
-            parse_mode=ParseMode.HTML,
-            reply_markup=cancel_kb()
+        await send_rich_message(
+            update, ctx,
+            "<h2>✍️ REPORT MESSAGE</h2>"
+            "<p>Type the reason text for your report:</p>"
+            "<footer>Maximum 512 characters.</footer>",
+            cancel_kb(), edit=True
         )
         return REPORT_MESSAGE
 
     if data == "confirm_report":
         sessions = await get_all_sessions()
         if not sessions:
-            await q.edit_message_text("❌ No active sessions. Add accounts first.", reply_markup=main_menu_kb())
+            await send_rich_message(
+                update, ctx,
+                "<h2>❌ NO ACTIVE SESSIONS</h2>"
+                "<p>Add accounts first before reporting.</p>",
+                main_menu_kb(), edit=True
+            )
             return ConversationHandler.END
 
         target         = tmp[uid]["target"]
@@ -1042,7 +1175,14 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         total_ids      = len(sessions)
         total_expected = total_ids * count
 
-        await q.edit_message_text("⏳ <b>Mass reporting started...</b>", parse_mode=ParseMode.HTML)
+        # Show "started" indicator on the confirm message
+        await send_rich_message(
+            update, ctx,
+            "<h2>⏳ REPORTING IN PROGRESS</h2>"
+            "<p><i>Mass report operation has started…</i></p>",
+            edit=True
+        )
+
         sent_msg = await q.message.reply_text(
             f"📡 <b>Reporting in progress...</b>\n\n"
             f"✅ Success : <code>0</code>\n"
@@ -1075,14 +1215,34 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             sessions, target, reason, count, report_message, progress_cb=cb
         )
 
+        rich_done = (
+            "<h1>📊 REPORT COMPLETE</h1>"
+            "<p><i>Mass report operation finished</i></p><hr/>"
+            "<table bordered striped>"
+            "<tr><th>RESULT</th><th>COUNT</th></tr>"
+            f"<tr><td>🎯 Target</td><td><code>{html.escape(target)}</code></td></tr>"
+            f"<tr><td>✅ Success</td><td><b>{result['success']}</b></td></tr>"
+            f"<tr><td>❌ Failed</td><td><b>{result['failed']}</b></td></tr>"
+            f"<tr><td>🔴 Expired</td><td><b>{result['expired']}</b></td></tr>"
+            f"<tr><td>👥 Total IDs</td><td><b>{total_ids}</b></td></tr>"
+            f"<tr><td>📊 Total Reports</td><td><b>{total_ids * count}</b></td></tr>"
+            "</table>"
+        )
+        if result.get("errors"):
+            unique = list(set(result["errors"]))[:5]
+            rich_done += (
+                "<h3>⚠️ ERRORS</h3>"
+                + "".join(f"<p><code>{html.escape(e)}</code></p>" for e in unique)
+            )
+        rich_done += "<footer>Report session complete.</footer>"
+
         err_line = ""
         if result.get("errors"):
             unique   = list(set(result["errors"]))[:5]
             err_line = "\n\n⚠️ <b>Errors:</b>\n" + "\n".join(
                 f"• <code>{html.escape(e)}</code>" for e in unique
             )
-
-        await sent_msg.edit_text(
+        fallback_done = (
             "╔══════════════════╗\n"
             "║   📊 REPORT DONE  ║\n"
             "╚══════════════════╝\n\n"
@@ -1092,9 +1252,12 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"🔴 Expired  : <code>{result['expired']}</code>\n"
             f"👥 Total IDs: <code>{total_ids}</code>\n"
             f"📊 Total    : <code>{total_ids * count}</code>"
-            f"{err_line}",
-            parse_mode=ParseMode.HTML,
-            reply_markup=main_menu_kb()
+            f"{err_line}"
+        )
+        await _rich_edit_by_id(
+            ctx, update.effective_chat.id, sent_msg.message_id,
+            rich_done, main_menu_kb(),
+            fallback_done, main_menu_kb()
         )
         tmp.pop(uid, None)
         return ConversationHandler.END
@@ -1108,8 +1271,12 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     phone = update.message.text.strip()
 
     if not re.fullmatch(r"\+[1-9]\d{7,14}", phone):
-        await update.message.reply_text(
-            "❌ Invalid format. Use: <code>+919876543210</code>", parse_mode=ParseMode.HTML
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ INVALID FORMAT</h2>"
+            "<p>Use international format: <code>+919876543210</code></p>"
+            "<footer>Include the country code with + prefix.</footer>",
+            cancel_kb()
         )
         return ADD_PHONE
 
@@ -1140,15 +1307,21 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "phone_code_hash": sent_code.phone_code_hash,
             "client_type":     "pyrogram",
         }
-        await update.message.reply_text(
-            "🔑 OTP sent to your Telegram app. Enter it below:",
-            reply_markup=cancel_kb()
+        await send_rich_message(
+            update, ctx,
+            "<h2>🔑 OTP SENT</h2>"
+            "<p>A verification code was sent to your Telegram app.</p>"
+            "<p>Enter the OTP below to continue:</p>"
+            "<footer>The code expires in a few minutes.</footer>",
+            cancel_kb()
         )
         return ADD_CODE
 
     except Exception as e:
-        await update.message.reply_text(
-            f"❌ Error: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML
+        await send_rich_message(
+            update, ctx,
+            f"<h2>❌ ERROR</h2><p><code>{html.escape(str(e))}</code></p>",
+            cancel_kb()
         )
         return ADD_PHONE
 
@@ -1167,10 +1340,17 @@ async def recv_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e:
         if "SessionPasswordNeeded" in type(e).__name__:
-            await update.message.reply_text("🔐 Enter your 2FA password:", reply_markup=cancel_kb())
+            await send_rich_message(
+                update, ctx,
+                "<h2>🔐 TWO-FACTOR AUTH</h2>"
+                "<p>Your account has 2FA enabled.</p>"
+                "<p>Enter your 2FA password to continue:</p>",
+                cancel_kb()
+            )
             return ADD_2FA
-        await update.message.reply_text(
-            f"❌ OTP error: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML
+        await send_rich_message(
+            update, ctx,
+            f"<h2>❌ OTP ERROR</h2><p><code>{html.escape(str(e))}</code></p>",
         )
         try:
             await client.disconnect()
@@ -1183,14 +1363,18 @@ async def recv_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         session_str = await client.export_session_string()
         await client.disconnect()
         await save_session(uid, data["phone"], session_str, client_type="pyrogram")
-        await update.message.reply_text(
-            f"✅ Account <code>{html.escape(data['phone'])}</code> added!",
-            parse_mode=ParseMode.HTML, reply_markup=main_menu_kb()
+        await send_rich_message(
+            update, ctx,
+            f"<h1>✅ ACCOUNT ADDED</h1>"
+            f"<p><code>{html.escape(data['phone'])}</code> connected successfully.</p>"
+            "<footer>Your session has been saved.</footer>",
+            main_menu_kb()
         )
         tmp.pop(uid, None)
     except Exception as e:
-        await update.message.reply_text(
-            f"❌ Session save error: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML
+        await send_rich_message(
+            update, ctx,
+            f"<h2>❌ SESSION SAVE ERROR</h2><p><code>{html.escape(str(e))}</code></p>"
         )
     return ConversationHandler.END
 
@@ -1206,14 +1390,18 @@ async def recv_2fa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         session_str = await client.export_session_string()
         await client.disconnect()
         await save_session(uid, data["phone"], session_str, client_type="pyrogram")
-        await update.message.reply_text(
-            f"✅ Account <code>{html.escape(data['phone'])}</code> added!",
-            parse_mode=ParseMode.HTML, reply_markup=main_menu_kb()
+        await send_rich_message(
+            update, ctx,
+            f"<h1>✅ ACCOUNT ADDED</h1>"
+            f"<p><code>{html.escape(data['phone'])}</code> connected successfully.</p>"
+            "<footer>Your session has been saved.</footer>",
+            main_menu_kb()
         )
         tmp.pop(uid, None)
     except Exception as e:
-        await update.message.reply_text(
-            f"❌ 2FA failed: <code>{html.escape(str(e))}</code>", parse_mode=ParseMode.HTML
+        await send_rich_message(
+            update, ctx,
+            f"<h2>❌ 2FA FAILED</h2><p><code>{html.escape(str(e))}</code></p>"
         )
     return ConversationHandler.END
 
@@ -1224,10 +1412,12 @@ async def recv_target(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     target = update.message.text.strip()
     tmp[uid] = {"target": target}
     kb = [[btn(v[0], f"cat_{k}")] for k, v in REASONS.items()]
-    await update.message.reply_text(
-        f"📂 <b>Select report category:</b>\n\n🎯 Target: <code>{html.escape(target)}</code>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=InlineKeyboardMarkup(kb)
+    await send_rich_message(
+        update, ctx,
+        "<h2>📂 SELECT REPORT CATEGORY</h2>"
+        f"<p>🎯 Target: <code>{html.escape(target)}</code></p><hr/>"
+        "<p>Select the category that best describes the content to report:</p>",
+        InlineKeyboardMarkup(kb)
     )
     return REPORT_REASON_CAT
 
@@ -1235,13 +1425,20 @@ async def recv_report_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid  = update.effective_user.id
     text = update.message.text.strip()
     if not text or len(text) > 512:
-        await update.message.reply_text("❌ Report message must be 1–512 characters. Try again:")
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ INVALID MESSAGE</h2>"
+            "<p>Report message must be between 1 and 512 characters.</p>"
+            "<p>Please try again:</p>"
+        )
         return REPORT_MESSAGE
     tmp[uid]["report_message"] = text
-    await update.message.reply_text(
-        "🔢 <b>Reports per ID?</b>\n\nEnter a number (e.g. 20):",
-        parse_mode=ParseMode.HTML,
-        reply_markup=cancel_kb()
+    await send_rich_message(
+        update, ctx,
+        "<h2>🔢 REPORTS PER ID</h2>"
+        "<p>How many reports should be sent per account?</p>"
+        "<p>Enter a number (e.g. <code>20</code>):</p>",
+        cancel_kb()
     )
     return REPORT_COUNT
 
@@ -1252,22 +1449,29 @@ async def recv_count(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if count < 1:
             raise ValueError
     except ValueError:
-        await update.message.reply_text("❌ Enter a valid positive number:")
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ INVALID NUMBER</h2><p>Enter a valid positive integer:</p>"
+        )
         return REPORT_COUNT
 
     tmp[uid]["count"] = count
     sessions = await get_all_sessions()
     t = tmp[uid]
-    await update.message.reply_text(
-        "⚠️ <b>Confirm Report</b>\n\n"
-        f"🎯 Target         : <code>{html.escape(t['target'])}</code>\n"
-        f"📋 Reason         : <code>{t['reason']}</code>\n"
-        f"✍️ Message        : <code>{html.escape(t['report_message'][:60])}{'...' if len(t['report_message']) > 60 else ''}</code>\n"
-        f"🔢 Per ID         : <code>{count}</code>\n"
-        f"👥 Active IDs     : <code>{len(sessions)}</code>\n"
-        f"📊 Total reports  : <code>{len(sessions) * count}</code>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=InlineKeyboardMarkup([
+    await send_rich_message(
+        update, ctx,
+        "<h1>⚠️ CONFIRM REPORT</h1>"
+        "<p><i>Review the details before proceeding</i></p><hr/>"
+        "<table bordered striped>"
+        f"<tr><td>🎯 Target</td><td><code>{html.escape(t['target'])}</code></td></tr>"
+        f"<tr><td>📋 Reason</td><td><code>{t['reason']}</code></td></tr>"
+        f"<tr><td>✍️ Message</td><td><code>{html.escape(t['report_message'][:60])}{'...' if len(t['report_message']) > 60 else ''}</code></td></tr>"
+        f"<tr><td>🔢 Per ID</td><td><b>{count}</b></td></tr>"
+        f"<tr><td>👥 Active IDs</td><td><b>{len(sessions)}</b></td></tr>"
+        f"<tr><td>📊 Total Reports</td><td><b>{len(sessions) * count}</b></td></tr>"
+        "</table>"
+        "<footer>⚠️ This action cannot be undone once started.</footer>",
+        InlineKeyboardMarkup([
             [btn("✅ Start Reporting", "confirm_report"),
              btn("❌ Cancel", "back")]
         ])
