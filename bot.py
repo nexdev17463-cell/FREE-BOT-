@@ -93,11 +93,21 @@ def btn(text: str, data: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(styled_text, callback_data=data, style=style)
 
 def main_menu_kb() -> InlineKeyboardMarkup:
+    developer = (OWNER_USERNAME or "").strip().lstrip("@")
+    if developer and re.fullmatch(r"[A-Za-z0-9_]{5,32}", developer):
+        developer_button = InlineKeyboardButton(
+            "◈ 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ◈",
+            url=f"https://t.me/{developer}",
+            style="danger",
+        )
+    else:
+        developer_button = btn("◈ 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ◈", "developer")
+
     return InlineKeyboardMarkup([
         [btn("➕ Add Account", "add_account"), btn("📊 Status", "status")],
         [btn("🚨 Mass Report", "start_report"), btn("📋 Sessions", "sessions")],
-        [btn("🔄 Refresh Sessions", "refresh_status")],
-        [btn("❔ Help", "help")],
+        [btn("🔄 Refresh Sessions", "refresh_status"), btn("❔ Help", "help")],
+        [developer_button],
     ])
 
 def cancel_kb() -> InlineKeyboardMarkup:
@@ -113,12 +123,53 @@ def status_kb() -> InlineKeyboardMarkup:
 # ── /start ───────────────────────────────────────────────────────────────────
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await remember_user(update.effective_user)
-    await update.message.reply_text(
-        "🤖 <b>Mass Report Bot</b>\n"
-        "<i>Multi-account • Fast Parallel Reports • MongoDB Sessions</i>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=main_menu_kb()
+
+    welcome_html = (
+        "<h1>✦ 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 𝗠𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 𝗕𝗢𝗧</h1>"
+        "<p><i>Your account management command center</i></p>"
+        "<hr/>"
+        "<h2>🚀 Get Started</h2>"
+        "<p>Manage your connected Telegram accounts and access your available tools from one clean dashboard.</p>"
+        "<h3>✧ Quick Access</h3>"
+        "<table bordered striped>"
+        "<tr><th>SECTION</th><th>WHAT YOU CAN DO</th></tr>"
+        "<tr><td><b>Accounts</b></td><td>Connect and manage accounts you own.</td></tr>"
+        "<tr><td><b>Sessions</b></td><td>Review saved sessions and their status.</td></tr>"
+        "<tr><td><b>Tools</b></td><td>Open the tools available to your access level.</td></tr>"
+        "<tr><td><b>Help Center</b></td><td>Read commands and usage guidance.</td></tr>"
+        "</table>"
+        "<p><i>Select an option below to continue.</i></p>"
+        "<footer>Use only accounts you own or are explicitly authorized to manage.</footer>"
     )
+
+    keyboard = main_menu_kb()
+    api_url = f"https://api.telegram.org/bot{ctx.bot.token}/sendRichMessage"
+    payload = {
+        "chat_id": update.effective_chat.id,
+        "rich_message": {"html": welcome_html},
+        "reply_markup": keyboard.to_dict(),
+    }
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=20)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(api_url, json=payload) as response:
+                result = await response.json(content_type=None)
+                if not response.ok or not result.get("ok"):
+                    raise RuntimeError(
+                        result.get("description", f"Telegram API HTTP {response.status}")
+                    )
+    except Exception as exc:
+        logging.warning("Rich welcome unavailable; using standard message fallback: %s", exc)
+        await update.effective_message.reply_text(
+            "✦ <b>WELCOME TO MASS REPORT BOT</b>\n"
+            "<i>Your account management command center</i>\n\n"
+            "🚀 <b>Get Started</b>\n"
+            "Manage your connected accounts and available tools from the menu below.\n\n"
+            "<i>Select an option to continue.</i>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=keyboard,
+        )
 
 
 # ── /help ────────────────────────────────────────────────────────────────────
@@ -551,7 +602,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid  = q.from_user.id
     await remember_user(q.from_user)
 
-    public = {"back", "help", "add_account", "cancel_flow"}
+    public = {"back", "help", "add_account", "cancel_flow", "developer"}
     if data not in public and not await has_access(uid):
         await q.answer("🔒 Access Denied", show_alert=True)
         return
@@ -591,6 +642,15 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data == "help":
         await help_cmd(update, ctx)
+        return
+
+    if data == "developer":
+        developer = (OWNER_USERNAME or "").strip().lstrip("@")
+        if developer and re.fullmatch(r"[A-Za-z0-9_]{5,32}", developer):
+            await q.answer("Opening developer profile…")
+            await q.message.reply_text(f"Developer: https://t.me/{developer}")
+        else:
+            await q.answer("Developer contact is not configured yet.", show_alert=True)
         return
 
     if data == "sessions":
