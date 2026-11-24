@@ -440,15 +440,61 @@ async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update):
         return
-    result = await refresh_all_sessions()
+
+    # Show a live progress panel immediately, then update it after each session.
+    progress_message = None
+    if update.callback_query:
+        progress_message = update.callback_query.message
+        try:
+            await progress_message.edit_text(
+                "🔄 <b>REFRESHING SESSIONS</b>\n\nPreparing session checks…",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
+    else:
+        progress_message = await update.effective_message.reply_text(
+            "🔄 <b>REFRESHING SESSIONS</b>\n\nPreparing session checks…",
+            parse_mode=ParseMode.HTML,
+        )
+
+    progress_lines = []
+
+    async def report_progress(index: int, total: int, phone: str, status: str):
+        icon, label = {
+            "active": ("🟢", "Active"),
+            "expired": ("🔴", "Expired"),
+            "error": ("⚠️", "Check error"),
+        }.get(status, ("ℹ️", status.title()))
+        phone_text = str(phone or "Unknown")
+        masked_phone = ("••••" + phone_text[-4:]) if len(phone_text) > 4 else phone_text
+        progress_lines.append(f"{icon} <code>{html.escape(masked_phone)}</code> — {label}")
+        # Keep the panel compact while still showing the latest checked sessions.
+        visible_lines = progress_lines[-5:]
+        body = (
+            "🔄 <b>REFRESHING SESSIONS</b>\n"
+            f"📊 Progress: <b>{index}/{total}</b>\n\n"
+            + "\n".join(visible_lines)
+        )
+        try:
+            await progress_message.edit_text(body, parse_mode=ParseMode.HTML)
+        except Exception as exc:
+            logging.debug("Refresh progress update skipped: %s", exc)
+
+    result = await refresh_all_sessions(on_progress=report_progress)
     rich = (
-        "<h1>✓ REFRESH COMPLETE</h1><p><i>Session verification summary</i></p><hr/>"
+        "<h1>✓ REFRESH COMPLETE</h1><p><i>Live session verification finished</i></p><hr/>"
         "<table bordered striped><tr><th>RESULT</th><th>COUNT</th></tr>"
         f"<tr><td>🟢 Active</td><td><b>{result['active']}</b></td></tr>"
         f"<tr><td>🔴 Expired</td><td><b>{result['expired']}</b></td></tr>"
         f"<tr><td>⚠️ Errors</td><td><b>{result['errors']}</b></td></tr>"
         f"<tr><td>📦 Checked</td><td><b>{result['checked']}</b></td></tr></table>"
     )
+    if not update.callback_query and progress_message:
+        try:
+            await progress_message.delete()
+        except Exception:
+            pass
     await send_rich_message(update, ctx, rich, status_kb(), edit=bool(update.callback_query))
 
 # ── /session ─────────────────────────────────────────────────────────────────
