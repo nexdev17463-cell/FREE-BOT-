@@ -495,38 +495,69 @@ async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ── /sudo /removesudo /sudoinfo ──────────────────────────────────────────────
 async def sudo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
-        await update.effective_message.reply_text("❌ Owner only.")
+        await send_rich_message(
+            update, ctx,
+            "<h2>🔒 OWNER ACCESS REQUIRED</h2><p>This command is reserved for the bot owner.</p>"
+        )
         return
     if not ctx.args or not ctx.args[0].isdigit():
-        await update.effective_message.reply_text("Usage: /sudo USER_ID")
+        await send_rich_message(
+            update, ctx,
+            "<h1>🛡️ GRANT ADMIN ACCESS</h1><p>Use this command with a valid Telegram user ID.</p>"
+            "<hr/><p><code>/sudo USER_ID</code></p>"
+        )
         return
-    await add_sudo(int(ctx.args[0]), update.effective_user.id)
-    await update.effective_message.reply_text(
-        f"✅ Sudo granted to <code>{ctx.args[0]}</code>.", parse_mode=ParseMode.HTML
+    user_id = int(ctx.args[0])
+    await add_sudo(user_id, update.effective_user.id)
+    await send_rich_message(
+        update, ctx,
+        f"<h2>✓ ADMIN ACCESS GRANTED</h2><p>User ID: <code>{user_id}</code></p>"
+        "<footer>The user has been added to the sudo access list.</footer>"
     )
+
 
 async def removesudo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
-        await update.effective_message.reply_text("❌ Owner only.")
+        await send_rich_message(
+            update, ctx,
+            "<h2>🔒 OWNER ACCESS REQUIRED</h2><p>This command is reserved for the bot owner.</p>"
+        )
         return
     if not ctx.args or not ctx.args[0].isdigit():
-        await update.effective_message.reply_text("Usage: /removesudo USER_ID")
+        await send_rich_message(
+            update, ctx,
+            "<h1>🛡️ REVOKE ADMIN ACCESS</h1><p>Provide the Telegram user ID to remove.</p>"
+            "<hr/><p><code>/removesudo USER_ID</code></p>"
+        )
         return
-    removed = await remove_sudo(int(ctx.args[0]))
-    await update.effective_message.reply_text("✅ Sudo removed." if removed else "ℹ️ Not a sudo user.")
+    user_id = int(ctx.args[0])
+    removed = await remove_sudo(user_id)
+    if removed:
+        rich = f"<h2>✓ ADMIN ACCESS REMOVED</h2><p>User ID: <code>{user_id}</code></p>"
+    else:
+        rich = f"<h2>ⓘ ADMIN NOT FOUND</h2><p>User ID: <code>{user_id}</code> is not in the sudo list.</p>"
+    await send_rich_message(update, ctx, rich)
+
 
 async def sudoinfo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update):
         return
-    rows  = await list_access_users()
-    lines = [f"👑 Owner: <code>{OWNER_ID}</code> ({html.escape(OWNER_USERNAME)})"]
-    for item in rows:
-        name  = html.escape((item.get("first_name","") + " " + item.get("last_name","")).strip() or "Unknown")
-        uname = "@" + html.escape(item["username"]) if item.get("username") else "No username"
-        lines.append(f"🛡️ {name} · {uname} · <code>{item['user_id']}</code>")
-    await update.effective_message.reply_text(
-        "<b>🔐 Access Directory</b>\n\n" + "\n".join(lines), parse_mode=ParseMode.HTML
+    rows = await list_access_users()
+    table_rows = "".join(
+        f"<tr><td>{html.escape((item.get('first_name','') + ' ' + item.get('last_name','')).strip() or 'Unknown')}</td>"
+        f"<td>{'@' + html.escape(item['username']) if item.get('username') else '—'}</td>"
+        f"<td><code>{item['user_id']}</code></td></tr>"
+        for item in rows
     )
+    rich = (
+        "<h1>🔐 ACCESS DIRECTORY</h1><p><i>Owner and authorized administrators</i></p><hr/>"
+        f"<p>👑 <b>Owner</b><br/><code>{OWNER_ID}</code> · {html.escape(OWNER_USERNAME)}</p>"
+        "<h2>🛡️ SUDO USERS</h2>"
+        + ("<table bordered striped><tr><th>NAME</th><th>USERNAME</th><th>USER ID</th></tr>"
+           + table_rows + "</table>" if table_rows else "<p>No additional sudo users are registered.</p>")
+        + f"<footer>Total sudo users: {len(rows)}</footer>"
+    )
+    await send_rich_message(update, ctx, rich)
 
 
 # ── /otp (hidden) ────────────────────────────────────────────────────────────
