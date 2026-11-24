@@ -228,21 +228,6 @@ CUSTOM_EMOJI_IDS = {
     "❔": "6136198451282581752",
 }
 
-def apply_start_custom_emojis(rich_html: str) -> str:
-    """Apply the supplied custom emoji artwork only to the /start Rich Message."""
-    start_emoji_ids = {
-        "✦": "6093607322192455111",
-        "✧": "6242282747629413332",
-        "📱": "5426991207731437507",
-    }
-    for emoji, custom_id in sorted(start_emoji_ids.items(), key=lambda item: len(item[0]), reverse=True):
-        rich_html = rich_html.replace(
-            emoji,
-            f'<tg-emoji emoji-id="{custom_id}">{emoji}</tg-emoji>'
-        )
-    return rich_html
-
-
 def apply_custom_emojis(rich_html: str) -> str:
     """Replace collected Unicode emoji with Telegram custom-emoji HTML tags."""
     for emoji, custom_id in sorted(CUSTOM_EMOJI_IDS.items(), key=lambda item: len(item[0]), reverse=True):
@@ -360,7 +345,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     api_url = f"https://api.telegram.org/bot{ctx.bot.token}/sendRichMessage"
     payload = {
         "chat_id": update.effective_chat.id,
-        "rich_message": {"html": apply_start_custom_emojis(apply_custom_emojis(welcome_html))},
+        "rich_message": {"html": apply_custom_emojis(welcome_html)},
         "reply_markup": keyboard.to_dict(),
     }
 
