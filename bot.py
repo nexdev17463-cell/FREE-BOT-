@@ -455,6 +455,8 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"<tr><td>{icon}</td><td><code>{phone}</code></td><td><b>{label}</b></td></tr>"
             for icon, phone, label in latest
         )
+        if not rows:
+            rows = '<tr><td>🔄</td><td colspan="2">Preparing checks…</td></tr>'
         return (
             f"<h1>{title}</h1>"
             f"<p><i>{state}</i></p><hr/>"
@@ -462,7 +464,7 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"<p><b>{percent}%</b> completed</p>"
             "<table bordered striped>"
             "<tr><th>STATUS</th><th>ACCOUNT</th><th>RESULT</th></tr>"
-            f"{rows or '<tr><td>🔄</td><td colspan=\"2\">Preparing checks…</td></tr>'}"
+            f"{rows}"
             "</table>"
             "<footer>🔐 Account numbers are masked for privacy</footer>"
         )
