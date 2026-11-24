@@ -96,11 +96,13 @@ async def build_client(sdata: dict):
     return build_telethon_client(sdata["session"])
 
 
-async def refresh_all_sessions() -> dict:
+async def refresh_all_sessions(on_progress=None) -> dict:
     records = await get_db().sessions.find({}).to_list(length=None)
     result = {"active": 0, "expired": 0, "checked": 0, "errors": 0}
-    for item in records:
+    total = len(records)
+    for index, item in enumerate(records, 1):
         client = None
+        status = "error"
         try:
             client = await build_client(item)
             client_type = item.get("client_type", "telethon")
@@ -116,12 +118,15 @@ async def refresh_all_sessions() -> dict:
             if authorized:
                 await mark_active(item["phone"])
                 result["active"] += 1
+                status = "active"
             else:
                 await mark_expired(item["phone"])
                 result["expired"] += 1
+                status = "expired"
             result["checked"] += 1
         except Exception:
             result["errors"] += 1
+            status = "error"
             if client:
                 try:
                     client_type = item.get("client_type", "telethon")
@@ -130,5 +135,12 @@ async def refresh_all_sessions() -> dict:
                     else:
                         await client.disconnect()
                 except Exception:
+                    pass
+        finally:
+            if on_progress:
+                try:
+                    await on_progress(index, total, item.get("phone", "Unknown"), status)
+                except Exception:
+                    # UI reporting must never interrupt the actual session refresh.
                     pass
     return result
