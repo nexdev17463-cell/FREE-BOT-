@@ -1,4 +1,5 @@
 import asyncio
+import aiohttp
 import time
 import html
 import logging
@@ -126,83 +127,131 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     priv = await has_access(uid)
     owner = is_owner(uid)
 
-    # Telegram blockquotes create soft shaded panels inside a normal message.
-    # Commands remain bold inline text; no pre/code-block layout is used.
-    text = (
-        "🤖 <b>MASS REPORT BOT</b>\n"
-        "<i>Command Center  ·  Quick Reference</i>\n\n"
-        "<blockquote>"
-        "👤 <b>ACCOUNT &amp; MENU</b>\n\n"
-        "<b>/start</b>\n"
-        "<i>Open the bot menu</i>\n\n"
-        "<b>/host</b>\n"
-        "<i>Connect your account · OTP / optional 2FA</i>\n\n"
-        "<b>/cancel</b>\n"
-        "<i>Cancel the current setup</i>\n\n"
-        "<b>/help</b>\n"
-        "<i>Show this command guide</i>"
-        "</blockquote>"
+    # Telegram Rich Messages render real headings and bordered tables.
+    rows_account = (
+        "<table bordered striped>"
+        "<tr><th>Command</th><th>Description</th></tr>"
+        "<tr><td><b>/start</b></td><td>Open the bot menu.</td></tr>"
+        "<tr><td><b>/host</b></td><td>Connect your own Telegram account (OTP / optional 2FA).</td></tr>"
+        "<tr><td><b>/cancel</b></td><td>Cancel the current setup.</td></tr>"
+        "<tr><td><b>/help</b></td><td>Show this command guide.</td></tr>"
+        "</table>"
+    )
+
+    rich_html = (
+        "<h1>🤖 MASS REPORT BOT</h1>"
+        "<p><i>Command Center · Quick Reference</i></p>"
+        "<h2>👤 Account &amp; Menu</h2>"
+        + rows_account
     )
 
     if priv:
-        text += (
-            "\n\n<blockquote>"
-            "⚙️ <b>BOT OPERATIONS</b>\n\n"
-            "<b>/status</b>\n"
-            "<i>View session statistics</i>\n\n"
-            "<b>/refresh</b>\n"
-            "<i>Verify saved session status</i>\n\n"
-            "<b>/session</b>\n"
-            "<i>List your saved sessions</i>\n\n"
-            "<b>/unhost +919876543210</b>\n"
-            "<i>Remove a hosted session</i>\n\n"
-            "<b>/join @username</b>\n"
-            "<i>Join a chat using authorized hosted accounts</i>\n\n"
-            "<b>/sudoinfo</b>\n"
-            "<i>View the Owner and Sudo directory</i>"
-            "</blockquote>"
+        rich_html += (
+            "<h2>⚙️ Bot Operations</h2>"
+            "<table bordered striped>"
+            "<tr><th>Command</th><th>Description</th></tr>"
+            "<tr><td><b>/status</b></td><td>View session statistics.</td></tr>"
+            "<tr><td><b>/refresh</b></td><td>Verify saved session status.</td></tr>"
+            "<tr><td><b>/session</b></td><td>List your saved sessions.</td></tr>"
+            "<tr><td><b>/unhost +919876543210</b></td><td>Remove a hosted session.</td></tr>"
+            "<tr><td><b>/join @username</b></td><td>Join a chat with accounts you are authorized to use.</td></tr>"
+            "<tr><td><b>/sudoinfo</b></td><td>View the Owner and Sudo directory.</td></tr>"
+            "</table>"
         )
 
     if owner:
-        text += (
-            "\n\n<blockquote>"
-            "👑 <b>OWNER CONTROLS</b>\n\n"
-            "<b>/sudo USER_ID</b>\n"
-            "<i>Grant Sudo access</i>\n\n"
-            "<b>/removesudo USER_ID</b>\n"
-            "<i>Revoke Sudo access</i>"
-            "</blockquote>"
+        rich_html += (
+            "<h2>👑 Owner Controls</h2>"
+            "<table bordered striped>"
+            "<tr><th>Command</th><th>Description</th></tr>"
+            "<tr><td><b>/sudo USER_ID</b></td><td>Grant Sudo access.</td></tr>"
+            "<tr><td><b>/removesudo USER_ID</b></td><td>Revoke Sudo access.</td></tr>"
+            "</table>"
         )
 
     if priv:
-        text += (
-            "\n\n<blockquote>"
-            "🔐 <b>ACCESS LEVEL</b>\n\n"
-            "<i>Owner / Sudo · Authorized bot operations</i>"
-            "</blockquote>"
+        rich_html += (
+            "<h2>🔐 Access Level</h2>"
+            "<p><b>Owner / Sudo</b> · Authorized bot operations.</p>"
         )
     else:
-        text += (
-            "\n\n<blockquote>"
-            "🔐 <b>ACCESS</b>\n\n"
-            "<i>Some operations are restricted to Owner / Sudo.</i>"
-            "</blockquote>"
+        rich_html += (
+            "<h2>🔐 Access</h2>"
+            "<p>Some operations are restricted to Owner / Sudo.</p>"
         )
 
-    text += (
-        "\n\n<i>Only connect and manage accounts you own or are "
-        "explicitly authorized to use.</i>"
+    rich_html += (
+        "<hr/>"
+        "<footer>Only connect and manage accounts you own or are explicitly "
+        "authorized to use.</footer>"
     )
 
     kb = InlineKeyboardMarkup([[btn("‹  BACK TO MENU  ›", "back")]])
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            text, parse_mode=ParseMode.HTML, reply_markup=kb
+    chat_id = update.effective_chat.id
+    api_url = f"https://api.telegram.org/bot{ctx.bot.token}/"
+
+    try:
+        if update.callback_query:
+            method = "editMessageText"
+            payload = {
+                "chat_id": chat_id,
+                "message_id": update.callback_query.message.message_id,
+                "rich_message": {"html": rich_html},
+                "reply_markup": kb.to_dict(),
+            }
+        else:
+            method = "sendRichMessage"
+            payload = {
+                "chat_id": chat_id,
+                "rich_message": {"html": rich_html},
+                "reply_markup": kb.to_dict(),
+            }
+
+        timeout = aiohttp.ClientTimeout(total=20)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(api_url + method, json=payload) as response:
+                result = await response.json(content_type=None)
+                if not response.ok or not result.get("ok"):
+                    raise RuntimeError(
+                        result.get("description", f"Telegram API HTTP {response.status}")
+                    )
+
+    except Exception as exc:
+        logging.warning("Rich help message unavailable; using standard help fallback: %s", exc)
+        fallback = (
+            "🤖 <b>MASS REPORT BOT</b>\n"
+            "<i>Command Center · Quick Reference</i>\n\n"
+            "<b>👤 ACCOUNT &amp; MENU</b>\n"
+            "<b>/start</b> — Open the bot menu\n"
+            "<b>/host</b> — Connect your own account (OTP / optional 2FA)\n"
+            "<b>/cancel</b> — Cancel the current setup\n"
+            "<b>/help</b> — Show this guide\n"
         )
-    else:
-        await update.effective_message.reply_text(
-            text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb()
-        )
+        if priv:
+            fallback += (
+                "\n<b>⚙️ BOT OPERATIONS</b>\n"
+                "<b>/status</b> — View session statistics\n"
+                "<b>/refresh</b> — Verify saved session status\n"
+                "<b>/session</b> — List saved sessions\n"
+                "<b>/unhost +919876543210</b> — Remove a hosted session\n"
+                "<b>/join @username</b> — Join a chat with authorized accounts\n"
+                "<b>/sudoinfo</b> — View Owner and Sudo directory\n"
+            )
+        if owner:
+            fallback += (
+                "\n<b>👑 OWNER CONTROLS</b>\n"
+                "<b>/sudo USER_ID</b> — Grant Sudo access\n"
+                "<b>/removesudo USER_ID</b> — Revoke Sudo access\n"
+            )
+        fallback += "\n<b>🔐 ACCESS</b>\nOwner / Sudo: authorized bot operations."
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                fallback, parse_mode=ParseMode.HTML, reply_markup=kb
+            )
+        else:
+            await update.effective_message.reply_text(
+                fallback, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb()
+            )
 
 # ── /host ────────────────────────────────────────────────────────────────────
 async def host_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
