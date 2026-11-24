@@ -61,17 +61,35 @@ tmp = {}
 async def has_access(user_id: int) -> bool:
     return is_owner(user_id) or await is_sudo(user_id)
 
-async def require_access(update: Update) -> bool:
+ACCESS_DENIED_HTML = (
+    "<h1>🔒 ACCESS DENIED</h1>"
+    "<hr/>"
+    "<p>🚫 You are not authorized to access this feature.</p>"
+    "<p>This command is restricted to Owner &amp; Sudo Users only.</p>"
+    "<h2>👑 Need Full Bot Access?</h2>"
+    "<p>Contact the Bot Owner to request Sudo Access.</p>"
+    "<p>👤 Owner: <b>@NODDY_FUCKER</b></p>"
+    "<hr/>"
+    "<footer>🛡️ SECURE ACCESS • AUTHORIZED USERS ONLY</footer>"
+)
+
+
+async def send_access_denied(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
+                             edit: bool = False):
+    keyboard = InlineKeyboardMarkup([[btn("🔙 Back to Menu", "back")]])
+    await send_rich_message(
+        update, ctx, ACCESS_DENIED_HTML, keyboard,
+        edit=edit and bool(update.callback_query)
+    )
+
+
+async def require_access(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> bool:
     if await has_access(update.effective_user.id):
         return True
-    msg = "🔒 <b>Access Denied</b>\n\nContact " + html.escape(OWNER_USERNAME) + " for access."
     if update.callback_query:
-        await update.callback_query.answer("🔒 Access Denied", show_alert=True)
-        await update.callback_query.message.reply_text(msg, parse_mode=ParseMode.HTML)
-    else:
-        await update.effective_message.reply_text(msg, parse_mode=ParseMode.HTML)
+        await update.callback_query.answer()
+    await send_access_denied(update, ctx, edit=bool(update.callback_query))
     return False
-
 
 # ── Keyboards ────────────────────────────────────────────────────────────────
 _BTN_STYLES = ["primary", "success", "danger"]
@@ -110,6 +128,8 @@ _BUTTON_CUSTOM_EMOJI_IDS = {
     "📋": "5431420628978641216",
     "🟢": "6084897373329296142",
     "🔐": "5870972873450984431",
+    "🔒": "5429405838345265327",
+    "🔙": "5253997076169115797",
     "📦": "5314665894406805639",
     "👤": "5298545073963679624",
     "⚙️": "5841276284155467413",
@@ -191,6 +211,8 @@ CUSTOM_EMOJI_IDS = {
     "📋": "5431420628978641216",
     "🟢": "6084897373329296142",
     "🔐": "5870972873450984431",
+    "🔒": "5429405838345265327",
+    "🔙": "5253997076169115797",
     "📦": "5314665894406805639",
     "👤": "5298545073963679624",
     "⚙️": "5841276284155467413",
@@ -496,7 +518,7 @@ async def host_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── /status ──────────────────────────────────────────────────────────────────
 async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not await require_access(update):
+    if not await require_access(update, ctx):
         return
     total = await get_total_count()
     active = await get_active_count()
@@ -513,7 +535,7 @@ async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── /refresh ─────────────────────────────────────────────────────────────────
 async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not await require_access(update):
+    if not await require_access(update, ctx):
         return
 
     chat_id = update.effective_chat.id
@@ -663,7 +685,7 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await send_rich_message(update, ctx, final_html, status_kb())
 # ── /session ─────────────────────────────────────────────────────────────────
 async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not await require_access(update):
+    if not await require_access(update, ctx):
         return
     from session_manager import get_user_sessions
     sessions = await get_user_sessions(update.effective_user.id)
@@ -681,7 +703,7 @@ async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── /unhost ──────────────────────────────────────────────────────────────────
 async def unhost_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not await require_access(update):
+    if not await require_access(update, ctx):
         return
     if not ctx.args:
         await send_rich_message(
@@ -709,7 +731,7 @@ async def unhost_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── /join ────────────────────────────────────────────────────────────────────
 async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not await require_access(update):
+    if not await require_access(update, ctx):
         return
     if not ctx.args:
         await send_rich_message(
@@ -797,10 +819,7 @@ async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ── /sudo /removesudo /sudoinfo ──────────────────────────────────────────────
 async def sudo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
-        await send_rich_message(
-            update, ctx,
-            "<h1>🔒 OWNER ACCESS REQUIRED</h1><p>🛡️ This control is restricted to the verified bot owner.</p><hr/><footer>🔐 Secure administration panel</footer>"
-        )
+        await send_access_denied(update, ctx)
         return
     if not ctx.args or not ctx.args[0].isdigit():
         await send_rich_message(
@@ -820,10 +839,7 @@ async def sudo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def removesudo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
-        await send_rich_message(
-            update, ctx,
-            "<h2>🔒 OWNER ACCESS REQUIRED</h2><p>This command is reserved for the bot owner.</p>"
-        )
+        await send_access_denied(update, ctx)
         return
     if not ctx.args or not ctx.args[0].isdigit():
         await send_rich_message(
@@ -842,7 +858,7 @@ async def removesudo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def sudoinfo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not await require_access(update):
+    if not await require_access(update, ctx):
         return
     rows = await list_access_users()
     table_rows = "".join(
@@ -1002,7 +1018,8 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     public = {"back", "help", "add_account", "cancel_flow", "developer"}
     if data not in public and not await has_access(uid):
-        await q.answer("🔒 Access Denied", show_alert=True)
+        await q.answer()
+        await send_access_denied(update, ctx, edit=True)
         return
     await q.answer()
 
