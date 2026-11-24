@@ -126,65 +126,71 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     priv = await has_access(uid)
     owner = is_owner(uid)
 
+    # Telegram blockquotes create soft shaded panels inside a normal message.
+    # Commands remain bold inline text; no pre/code-block layout is used.
     text = (
         "🤖 <b>MASS REPORT BOT</b>\n"
-        "<i>Command Center  ·  Quick Reference</i>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<i>Command Center  ·  Quick Reference</i>\n\n"
+        "<blockquote>"
         "👤 <b>ACCOUNT &amp; MENU</b>\n\n"
-        "<code>/start</code>\n"
+        "<b>/start</b>\n"
         "<i>Open the bot menu</i>\n\n"
-        "<code>/host</code>\n"
-        "<i>Connect an account you own · OTP / optional 2FA</i>\n\n"
-        "<code>/cancel</code>\n"
+        "<b>/host</b>\n"
+        "<i>Connect your account · OTP / optional 2FA</i>\n\n"
+        "<b>/cancel</b>\n"
         "<i>Cancel the current setup</i>\n\n"
-        "<code>/help</code>\n"
-        "<i>Show this command guide</i>\n"
+        "<b>/help</b>\n"
+        "<i>Show this command guide</i>"
+        "</blockquote>"
     )
 
     if priv:
         text += (
-            "\n━━━━━━━━━━━━━━━━━━━━\n"
+            "\n\n<blockquote>"
             "⚙️ <b>BOT OPERATIONS</b>\n\n"
-            "<code>/status</code>\n"
+            "<b>/status</b>\n"
             "<i>View session statistics</i>\n\n"
-            "<code>/refresh</code>\n"
+            "<b>/refresh</b>\n"
             "<i>Verify saved session status</i>\n\n"
-            "<code>/session</code>\n"
+            "<b>/session</b>\n"
             "<i>List your saved sessions</i>\n\n"
-            "<code>/unhost +919876543210</code>\n"
+            "<b>/unhost +919876543210</b>\n"
             "<i>Remove a hosted session</i>\n\n"
-            "<code>/join @username</code>\n"
+            "<b>/join @username</b>\n"
             "<i>Join a chat using authorized hosted accounts</i>\n\n"
-            "<code>/sudoinfo</code>\n"
-            "<i>View the Owner and Sudo directory</i>\n"
+            "<b>/sudoinfo</b>\n"
+            "<i>View the Owner and Sudo directory</i>"
+            "</blockquote>"
         )
 
     if owner:
         text += (
-            "\n━━━━━━━━━━━━━━━━━━━━\n"
+            "\n\n<blockquote>"
             "👑 <b>OWNER CONTROLS</b>\n\n"
-            "<code>/sudo USER_ID</code>\n"
+            "<b>/sudo USER_ID</b>\n"
             "<i>Grant Sudo access</i>\n\n"
-            "<code>/removesudo USER_ID</code>\n"
-            "<i>Revoke Sudo access</i>\n"
+            "<b>/removesudo USER_ID</b>\n"
+            "<i>Revoke Sudo access</i>"
+            "</blockquote>"
         )
 
     if priv:
         text += (
-            "\n━━━━━━━━━━━━━━━━━━━━\n"
+            "\n\n<blockquote>"
             "🔐 <b>ACCESS LEVEL</b>\n\n"
-            "<i>Owner / Sudo · Authorized bot operations</i>\n"
+            "<i>Owner / Sudo · Authorized bot operations</i>"
+            "</blockquote>"
         )
     else:
         text += (
-            "\n━━━━━━━━━━━━━━━━━━━━\n"
+            "\n\n<blockquote>"
             "🔐 <b>ACCESS</b>\n\n"
-            "<i>Some operations are restricted to Owner / Sudo.</i>\n"
+            "<i>Some operations are restricted to Owner / Sudo.</i>"
+            "</blockquote>"
         )
 
     text += (
-        "\n━━━━━━━━━━━━━━━━━━━━\n"
-        "<i>Only connect and manage accounts you own or are "
+        "\n\n<i>Only connect and manage accounts you own or are "
         "explicitly authorized to use.</i>"
     )
 
