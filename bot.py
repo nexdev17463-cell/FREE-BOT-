@@ -122,46 +122,67 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── /help ────────────────────────────────────────────────────────────────────
 async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid  = update.effective_user.id
+    uid = update.effective_user.id
     priv = await has_access(uid)
+
+    # Spacious, section-based help layout. Keep descriptions short for mobile.
     text = (
-        "🤖 <b>Mass Report Bot — Commands</b>\n"
-        "━━━━━━━━━━━━━━━━\n\n"
-        "<b>General</b>\n"
-        "/start — Main menu\n"
-        "/host — Add a Telegram account\n"
-        "/cancel — Cancel current flow\n"
-        "/help — This message\n"
+        "✦ <b>HELP CENTER</b>\n"
+        "<i>Your quick guide to bot commands</i>\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "▎ <b>GETTING STARTED</b>\n"
+        "<code>/start</code>\n"
+        "<i>Open the main menu</i>\n\n"
+        "<code>/host</code>\n"
+        "<i>Connect a Telegram account you own</i>\n\n"
+        "<code>/cancel</code>\n"
+        "<i>Cancel the current action</i>\n\n"
+        "<code>/help</code>\n"
+        "<i>Show this help guide</i>\n"
     )
+
     if priv:
         text += (
-            "\n<b>Operations</b>\n"
-            "/status — Session statistics\n"
-            "/refresh — Verify all sessions\n"
-            "/session — List your sessions\n"
-            "/unhost +91xxx — Remove a session\n"
-            "/join @username — Join with all accounts\n"
-            "/sudoinfo — Access directory\n"
+            "\n━━━━━━━━━━━━━━━━━━\n"
+            "▎ <b>ACCOUNT MANAGEMENT</b>\n"
+            "<code>/status</code>\n"
+            "<i>View account and session statistics</i>\n\n"
+            "<code>/refresh</code>\n"
+            "<i>Check the status of saved sessions</i>\n\n"
+            "<code>/session</code>\n"
+            "<i>View your saved sessions</i>\n\n"
+            "<code>/unhost +91XXXXXXXXXX</code>\n"
+            "<i>Remove a saved session</i>\n\n"
+            "<code>/sudoinfo</code>\n"
+            "<i>View the access directory</i>\n"
         )
+
     if is_owner(uid):
         text += (
-            "\n<b>Owner</b>\n"
-            "/sudo USER_ID — Grant sudo access\n"
-            "/removesudo USER_ID — Revoke sudo access\n"
+            "\n━━━━━━━━━━━━━━━━━━\n"
+            "▎ <b>OWNER CONTROLS</b>\n"
+            "<code>/sudo USER_ID</code>\n"
+            "<i>Grant sudo access</i>\n\n"
+            "<code>/removesudo USER_ID</code>\n"
+            "<i>Revoke sudo access</i>\n"
         )
+
     text += (
-        "\n<b>Reporting targets:</b>\n"
-        "• @username\n"
-        "• https://t.me/username\n"
-        "• https://t.me/username/123\n"
-        "• https://t.me/c/CHANNELID/123\n"
-        "• Numeric Telegram ID"
+        "\n━━━━━━━━━━━━━━━━━━\n"
+        "<i>Use account controls only for accounts you own "
+        "or are explicitly authorized to manage.</i>\n"
+        "\n<tg-spoiler>Need assistance? Contact the bot owner.</tg-spoiler>"
     )
-    kb = InlineKeyboardMarkup([[btn("🔙 Back", "back")]])
+
+    kb = InlineKeyboardMarkup([[btn("‹  BACK TO MENU  ›", "back")]])
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        await update.callback_query.edit_message_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=kb
+        )
     else:
-        await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb())
+        await update.effective_message.reply_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb()
+        )
 
 
 # ── /host ────────────────────────────────────────────────────────────────────
