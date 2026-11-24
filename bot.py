@@ -264,7 +264,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     api_url = f"https://api.telegram.org/bot{ctx.bot.token}/sendRichMessage"
     payload = {
         "chat_id": update.effective_chat.id,
-        "rich_message": {"html": welcome_html},
+        "rich_message": {"html": apply_custom_emojis(welcome_html)},
         "reply_markup": keyboard.to_dict(),
     }
 
@@ -366,7 +366,7 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             payload = {
                 "chat_id": chat_id,
                 "message_id": update.callback_query.message.message_id,
-                "rich_message": {"html": rich_html},
+                "rich_message": {"html": apply_custom_emojis(rich_html)},
                 "reply_markup": kb.to_dict(),
             }
         else:
