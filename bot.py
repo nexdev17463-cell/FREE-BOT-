@@ -391,7 +391,7 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             method = "sendRichMessage"
             payload = {
                 "chat_id": chat_id,
-                "rich_message": {"html": rich_html},
+                "rich_message": {"html": apply_custom_emojis(rich_html)},
                 "reply_markup": kb.to_dict(),
             }
 
