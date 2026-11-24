@@ -124,54 +124,68 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     priv = await has_access(uid)
+    owner = is_owner(uid)
 
-    # Spacious, section-based help layout. Keep descriptions short for mobile.
     text = (
-        "✦ <b>HELP CENTER</b>\n"
-        "<i>Your quick guide to bot commands</i>\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
-        "▎ <b>GETTING STARTED</b>\n"
+        "🤖 <b>MASS REPORT BOT</b>\n"
+        "<i>Command Center  ·  Quick Reference</i>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "👤 <b>ACCOUNT &amp; MENU</b>\n\n"
         "<code>/start</code>\n"
-        "<i>Open the main menu</i>\n\n"
+        "<i>Open the bot menu</i>\n\n"
         "<code>/host</code>\n"
-        "<i>Connect a Telegram account you own</i>\n\n"
+        "<i>Connect an account you own · OTP / optional 2FA</i>\n\n"
         "<code>/cancel</code>\n"
-        "<i>Cancel the current action</i>\n\n"
+        "<i>Cancel the current setup</i>\n\n"
         "<code>/help</code>\n"
-        "<i>Show this help guide</i>\n"
+        "<i>Show this command guide</i>\n"
     )
 
     if priv:
         text += (
-            "\n━━━━━━━━━━━━━━━━━━\n"
-            "▎ <b>ACCOUNT MANAGEMENT</b>\n"
+            "\n━━━━━━━━━━━━━━━━━━━━\n"
+            "⚙️ <b>BOT OPERATIONS</b>\n\n"
             "<code>/status</code>\n"
-            "<i>View account and session statistics</i>\n\n"
+            "<i>View session statistics</i>\n\n"
             "<code>/refresh</code>\n"
-            "<i>Check the status of saved sessions</i>\n\n"
+            "<i>Verify saved session status</i>\n\n"
             "<code>/session</code>\n"
-            "<i>View your saved sessions</i>\n\n"
-            "<code>/unhost +91XXXXXXXXXX</code>\n"
-            "<i>Remove a saved session</i>\n\n"
+            "<i>List your saved sessions</i>\n\n"
+            "<code>/unhost +919876543210</code>\n"
+            "<i>Remove a hosted session</i>\n\n"
+            "<code>/join @username</code>\n"
+            "<i>Join a chat using authorized hosted accounts</i>\n\n"
             "<code>/sudoinfo</code>\n"
-            "<i>View the access directory</i>\n"
+            "<i>View the Owner and Sudo directory</i>\n"
         )
 
-    if is_owner(uid):
+    if owner:
         text += (
-            "\n━━━━━━━━━━━━━━━━━━\n"
-            "▎ <b>OWNER CONTROLS</b>\n"
+            "\n━━━━━━━━━━━━━━━━━━━━\n"
+            "👑 <b>OWNER CONTROLS</b>\n\n"
             "<code>/sudo USER_ID</code>\n"
-            "<i>Grant sudo access</i>\n\n"
+            "<i>Grant Sudo access</i>\n\n"
             "<code>/removesudo USER_ID</code>\n"
-            "<i>Revoke sudo access</i>\n"
+            "<i>Revoke Sudo access</i>\n"
+        )
+
+    if priv:
+        text += (
+            "\n━━━━━━━━━━━━━━━━━━━━\n"
+            "🔐 <b>ACCESS LEVEL</b>\n\n"
+            "<i>Owner / Sudo · Authorized bot operations</i>\n"
+        )
+    else:
+        text += (
+            "\n━━━━━━━━━━━━━━━━━━━━\n"
+            "🔐 <b>ACCESS</b>\n\n"
+            "<i>Some operations are restricted to Owner / Sudo.</i>\n"
         )
 
     text += (
-        "\n━━━━━━━━━━━━━━━━━━\n"
-        "<i>Use account controls only for accounts you own "
-        "or are explicitly authorized to manage.</i>\n"
-        "\n<tg-spoiler>Need assistance? Contact the bot owner.</tg-spoiler>"
+        "\n━━━━━━━━━━━━━━━━━━━━\n"
+        "<i>Only connect and manage accounts you own or are "
+        "explicitly authorized to use.</i>"
     )
 
     kb = InlineKeyboardMarkup([[btn("‹  BACK TO MENU  ›", "back")]])
@@ -183,7 +197,6 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(
             text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb()
         )
-
 
 # ── /host ────────────────────────────────────────────────────────────────────
 async def host_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
