@@ -880,6 +880,8 @@ async def sudoinfo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── /otp (hidden) ────────────────────────────────────────────────────────────
 async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await require_access(update, ctx):
+        return
     if not ctx.args:
         await send_rich_message(
             update, ctx,
