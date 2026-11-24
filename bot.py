@@ -375,12 +375,6 @@ async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update):
         return
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            "🔄 <b>Verifying saved sessions…</b>", parse_mode=ParseMode.HTML
-        )
-    else:
-        msg = await update.effective_message.reply_text("🔄 Verifying saved sessions…")
     result = await refresh_all_sessions()
     rich = (
         "<h1>✓ REFRESH COMPLETE</h1><p><i>Session verification summary</i></p><hr/>"
@@ -390,7 +384,7 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"<tr><td>⚠️ Errors</td><td><b>{result['errors']}</b></td></tr>"
         f"<tr><td>📦 Checked</td><td><b>{result['checked']}</b></td></tr></table>"
     )
-    await send_rich_message(update, ctx, rich, status_kb())
+    await send_rich_message(update, ctx, rich, status_kb(), edit=bool(update.callback_query))
 
 # ── /session ─────────────────────────────────────────────────────────────────
 async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -678,7 +672,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             body = "🔴 <b>Expired Accounts</b>\n\n" + "\n\n".join(lines)
         rich_body = (
             "<h1>🔴 EXPIRED SESSIONS</h1><p><i>Accounts requiring attention</i></p><hr/>"
-            + body.replace("\\n", "<br/>")
+            + body.replace("\n", "<br/>")
         )
         await send_rich_message(update, ctx, rich_body, InlineKeyboardMarkup([
             [btn("🔄 Refresh", "refresh_status")],
@@ -701,11 +695,18 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data == "sessions":
         sessions = await get_all_sessions()
-        lines = [f"<code>{i}. {s['phone']}</code>" for i, s in enumerate(sessions, 1)] or ["No active sessions."]
-        await q.edit_message_text(
-            "<b>📋 Active Sessions</b>\n\n" + "\n".join(lines),
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup([[btn("🔙 Back", "back")]])
+        rows = "".join(
+            f"<tr><td>{i}</td><td><code>{html.escape(str(item.get('phone','?')))}</code></td></tr>"
+            for i, item in enumerate(sessions, 1)
+        )
+        rich = (
+            "<h1>📋 ALL SESSIONS</h1><p><i>Saved account overview</i></p><hr/>"
+            + ("<table bordered striped><tr><th>#</th><th>PHONE</th></tr>" + rows + "</table>"
+               if rows else "<p>No saved sessions were found.</p>")
+        )
+        await send_rich_message(
+            update, ctx, rich,
+            InlineKeyboardMarkup([[btn("🔙 Back", "back")]]), edit=True
         )
         return
 
