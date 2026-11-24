@@ -2,6 +2,7 @@ import asyncio
 import time
 import html
 import logging
+import random
 import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
@@ -72,8 +73,12 @@ async def require_access(update: Update) -> bool:
 
 
 # ── Keyboards ────────────────────────────────────────────────────────────────
+_BTN_STYLES = ["primary", "success", "danger"]
+
+
 def btn(text: str, data: str) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text, callback_data=data)
+    style = random.choice(_BTN_STYLES)
+    return InlineKeyboardButton(text, callback_data=data, style=style)
 
 def main_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
