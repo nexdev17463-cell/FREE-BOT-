@@ -116,6 +116,48 @@ def status_kb() -> InlineKeyboardMarkup:
     ])
 
 
+# ── Premium message presentation (UI only) ───────────────────────────────────
+async def send_rich_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
+                            rich_html: str, reply_markup=None, edit: bool = False):
+    """Render safe informational UI with Telegram Rich Messages; keep a HTML fallback."""
+    chat_id = update.effective_chat.id
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    payload = {
+        "chat_id": chat_id,
+        "rich_message": {"html": rich_html},
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup.to_dict()
+    if edit and update.callback_query:
+        payload["message_id"] = update.callback_query.message.message_id
+        method = "editMessageText"
+    else:
+        method = "sendRichMessage"
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=20)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(api_base + method, json=payload) as response:
+                result = await response.json(content_type=None)
+                if not response.ok or not result.get("ok"):
+                    raise RuntimeError(result.get("description", f"Telegram API HTTP {response.status}"))
+        return
+    except Exception as exc:
+        logging.warning("Rich message unavailable; using HTML fallback: %s", exc)
+
+    plain_html = re.sub(r"<(h[1-6]|p|div|footer|table|tr|th|td|hr|mark)[^>]*>", "", rich_html)
+    plain_html = re.sub(r"</(h[1-6]|p|div|footer|table|tr|th|td|mark)>", "\\n", plain_html)
+    plain_html = plain_html.replace("<hr/>", "\\n━━━━━━━━━━━━━━━━━━\\n")
+    if edit and update.callback_query:
+        await update.callback_query.edit_message_text(
+            plain_html, parse_mode=ParseMode.HTML, reply_markup=reply_markup
+        )
+    else:
+        await update.effective_message.reply_text(
+            plain_html, parse_mode=ParseMode.HTML, reply_markup=reply_markup
+        )
+
+
 # ── /start ───────────────────────────────────────────────────────────────────
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await remember_user(update.effective_user)
@@ -377,21 +419,26 @@ async def unhost_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update):
         return
     if not ctx.args:
-        await update.effective_message.reply_text(
-            "Usage: <code>/unhost +919876543210</code>", parse_mode=ParseMode.HTML
+        await send_rich_message(
+            update, ctx,
+            "<h2>🗑 REMOVE A SESSION</h2><p>Provide the phone number of the session you want to remove.</p>"
+            "<p><code>/unhost +919876543210</code></p>"
         )
         return
     phone   = ctx.args[0].strip()
     removed = await delete_session(phone, update.effective_user.id)
     if removed:
-        await update.effective_message.reply_text(
-            f"✅ Session <code>{html.escape(phone)}</code> removed.",
-            parse_mode=ParseMode.HTML, reply_markup=main_menu_kb()
+        await send_rich_message(
+            update, ctx,
+            f"<h2>✓ SESSION REMOVED</h2><p><code>{html.escape(phone)}</code></p>"
+            "<footer>The saved session was removed.</footer>",
+            main_menu_kb()
         )
     else:
-        await update.effective_message.reply_text(
-            f"ℹ️ No session found for <code>{html.escape(phone)}</code>.",
-            parse_mode=ParseMode.HTML, reply_markup=main_menu_kb()
+        await send_rich_message(
+            update, ctx,
+            f"<h2>ⓘ SESSION NOT FOUND</h2><p>No saved session matches <code>{html.escape(phone)}</code>.</p>",
+            main_menu_kb()
         )
 
 
@@ -582,12 +629,12 @@ async def cancel_flow(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await data["client"].disconnect()
         except Exception:
             pass
-    text = "❌ Cancelled."
+    rich = "<h2>✓ ACTION CANCELLED</h2><p>Your current operation was cancelled.</p><footer>You can choose another option from the menu.</footer>"
     if update.callback_query:
         await update.callback_query.answer("Cancelled.")
-        await update.callback_query.edit_message_text(text, reply_markup=main_menu_kb())
+        await send_rich_message(update, ctx, rich, main_menu_kb())
     else:
-        await update.effective_message.reply_text(text, reply_markup=main_menu_kb())
+        await send_rich_message(update, ctx, rich, main_menu_kb())
     return ConversationHandler.END
 
 
@@ -605,8 +652,11 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await q.answer()
 
     if data == "back":
-        await q.edit_message_text(
-            "🤖 <b>Mass Report Bot</b>", parse_mode=ParseMode.HTML, reply_markup=main_menu_kb()
+        await send_rich_message(
+            update, ctx,
+            "<h1>🤖 MASS REPORT BOT</h1><p><i>Your account management dashboard</i></p>"
+            "<hr/><p>Select an option from the menu below.</p>",
+            main_menu_kb(), edit=True
         )
         return ConversationHandler.END
 
@@ -630,10 +680,14 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 when    = checked.strftime("%Y-%m-%d %H:%M UTC") if checked else "Never"
                 lines.append(f"<b>{i}. {phone}</b>\n   🕒 {html.escape(when)}")
             body = "🔴 <b>Expired Accounts</b>\n\n" + "\n\n".join(lines)
-        await q.edit_message_text(body, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([
+        rich_body = (
+            "<h1>🔴 EXPIRED SESSIONS</h1><p><i>Accounts requiring attention</i></p><hr/>"
+            + body.replace("\\n", "<br/>")
+        )
+        await send_rich_message(update, ctx, rich_body, InlineKeyboardMarkup([
             [btn("🔄 Refresh", "refresh_status")],
             [btn("🔙 Back", "status")],
-        ]))
+        ]), edit=True)
         return
 
     if data == "help":
