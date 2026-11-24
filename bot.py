@@ -441,62 +441,149 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update):
         return
 
-    # Show a live progress panel immediately, then update it after each session.
-    progress_message = None
-    if update.callback_query:
-        progress_message = update.callback_query.message
-        try:
-            await progress_message.edit_text(
-                "🔄 <b>REFRESHING SESSIONS</b>\n\nPreparing session checks…",
-                parse_mode=ParseMode.HTML,
-            )
-        except Exception:
-            pass
-    else:
-        progress_message = await update.effective_message.reply_text(
-            "🔄 <b>REFRESHING SESSIONS</b>\n\nPreparing session checks…",
-            parse_mode=ParseMode.HTML,
+    chat_id = update.effective_chat.id
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    progress_message = update.callback_query.message if update.callback_query else None
+    progress_message_id = progress_message.message_id if progress_message else None
+    progress_lines = []
+
+    def build_progress_html(index: int, total: int, latest: list, finished: bool = False):
+        percent = int((index / total) * 100) if total else 100
+        title = "✦ SESSION REFRESH COMPLETE" if finished else "✦ SESSION REFRESH"
+        state = "All session checks finished" if finished else "Verifying connected sessions"
+        rows = "".join(
+            f"<tr><td>{icon}</td><td><code>{phone}</code></td><td><b>{label}</b></td></tr>"
+            for icon, phone, label in latest
+        )
+        return (
+            f"<h1>{title}</h1>"
+            f"<p><i>{state}</i></p><hr/>"
+            f"<h2>📊 Progress · {index}/{total}</h2>"
+            f"<p><b>{percent}%</b> completed</p>"
+            "<table bordered striped>"
+            "<tr><th>STATUS</th><th>ACCOUNT</th><th>RESULT</th></tr>"
+            f"{rows or '<tr><td>🔄</td><td colspan=\"2\">Preparing checks…</td></tr>'}"
+            "</table>"
+            "<footer>🔐 Account numbers are masked for privacy</footer>"
         )
 
-    progress_lines = []
+    async def publish_progress(html_content: str, fallback_text: str, initial: bool = False):
+        nonlocal progress_message_id, progress_message
+        rich_html = apply_custom_emojis(html_content)
+        method = "sendRichMessage" if progress_message_id is None else "editMessageText"
+        payload = {
+            "chat_id": chat_id,
+            "rich_message": {"html": rich_html},
+        }
+        if progress_message_id is not None:
+            payload["message_id"] = progress_message_id
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(api_base + method, json=payload) as response:
+                    result = await response.json(content_type=None)
+                    if not response.ok or not result.get("ok"):
+                        raise RuntimeError(result.get("description", "Rich progress update failed"))
+                    if method == "sendRichMessage":
+                        progress_message_id = result["result"]["message_id"]
+            return
+        except Exception as exc:
+            logging.debug("Rich refresh panel unavailable; using HTML fallback: %s", exc)
+
+        try:
+            if progress_message_id is None:
+                progress_message = await update.effective_message.reply_text(
+                    fallback_text, parse_mode=ParseMode.HTML
+                )
+                progress_message_id = progress_message.message_id
+            else:
+                await ctx.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=progress_message_id,
+                    text=fallback_text,
+                    parse_mode=ParseMode.HTML,
+                )
+        except Exception as exc:
+            logging.debug("Refresh fallback update skipped: %s", exc)
 
     async def report_progress(index: int, total: int, phone: str, status: str):
         icon, label = {
-            "active": ("🟢", "Active"),
-            "expired": ("🔴", "Expired"),
-            "error": ("⚠️", "Check error"),
-        }.get(status, ("ℹ️", status.title()))
+            "active": ("🟢", "ACTIVE"),
+            "expired": ("🔴", "EXPIRED"),
+            "error": ("⚠️", "CHECK ERROR"),
+        }.get(status, ("ℹ️", status.upper()))
         phone_text = str(phone or "Unknown")
         masked_phone = ("••••" + phone_text[-4:]) if len(phone_text) > 4 else phone_text
-        progress_lines.append(f"{icon} <code>{html.escape(masked_phone)}</code> — {label}")
-        # Keep the panel compact while still showing the latest checked sessions.
-        visible_lines = progress_lines[-5:]
-        body = (
-            "🔄 <b>REFRESHING SESSIONS</b>\n"
-            f"📊 Progress: <b>{index}/{total}</b>\n\n"
-            + "\n".join(visible_lines)
+        progress_lines.append((icon, html.escape(masked_phone), label))
+        visible_lines = progress_lines[-6:]
+        panel = build_progress_html(index, total, visible_lines)
+        fallback = (
+            f"✦ SESSION REFRESH\n📊 Progress: {index}/{total}\n\n"
+            + "\n".join(f"{row[0]} {row[1]} — {row[2]}" for row in visible_lines)
         )
-        try:
-            await progress_message.edit_text(body, parse_mode=ParseMode.HTML)
-        except Exception as exc:
-            logging.debug("Refresh progress update skipped: %s", exc)
+        await publish_progress(panel, fallback)
+
+    await publish_progress(
+        build_progress_html(0, 0, []),
+        "🔄 SESSION REFRESH\nPreparing session checks…",
+        initial=True,
+    )
 
     result = await refresh_all_sessions(on_progress=report_progress)
-    rich = (
-        "<h1>✓ REFRESH COMPLETE</h1><p><i>Live session verification finished</i></p><hr/>"
-        "<table bordered striped><tr><th>RESULT</th><th>COUNT</th></tr>"
-        f"<tr><td>🟢 Active</td><td><b>{result['active']}</b></td></tr>"
-        f"<tr><td>🔴 Expired</td><td><b>{result['expired']}</b></td></tr>"
-        f"<tr><td>⚠️ Errors</td><td><b>{result['errors']}</b></td></tr>"
-        f"<tr><td>📦 Checked</td><td><b>{result['checked']}</b></td></tr></table>"
+    summary_rows = [
+        ("🟢", "ACTIVE", result["active"]),
+        ("🔴", "EXPIRED", result["expired"]),
+        ("⚠️", "ERRORS", result["errors"]),
+        ("📦", "CHECKED", result["checked"]),
+    ]
+    summary_table = "".join(
+        f"<tr><td>{icon} {label}</td><td><b>{count}</b></td></tr>"
+        for icon, label, count in summary_rows
     )
-    if not update.callback_query and progress_message:
-        try:
-            await progress_message.delete()
-        except Exception:
-            pass
-    await send_rich_message(update, ctx, rich, status_kb(), edit=bool(update.callback_query))
+    final_html = (
+        "<h1>✦ SESSION REFRESH COMPLETE</h1>"
+        "<p><i>All available session checks have finished.</i></p><hr/>"
+        "<table bordered striped><tr><th>RESULT</th><th>COUNT</th></tr>"
+        f"{summary_table}</table>"
+        "<footer>🔐 Account numbers were kept private during verification</footer>"
+    )
+    final_text = (
+        "✦ SESSION REFRESH COMPLETE\n\n"
+        f"🟢 Active: {result['active']}\n"
+        f"🔴 Expired: {result['expired']}\n"
+        f"⚠️ Errors: {result['errors']}\n"
+        f"📦 Checked: {result['checked']}"
+    )
 
+    # Replace the live panel with the final rich summary and restore the menu.
+    try:
+        rich_html = apply_custom_emojis(final_html)
+        payload = {
+            "chat_id": chat_id,
+            "message_id": progress_message_id,
+            "rich_message": {"html": rich_html},
+            "reply_markup": status_kb().to_dict(),
+        }
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(api_base + "editMessageText", json=payload) as response:
+                result_json = await response.json(content_type=None)
+                if not response.ok or not result_json.get("ok"):
+                    raise RuntimeError(result_json.get("description", "Final rich panel update failed"))
+    except Exception as exc:
+        logging.debug("Final rich panel update unavailable: %s", exc)
+        if progress_message_id is not None:
+            try:
+                await ctx.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=progress_message_id,
+                    text=final_text,
+                    reply_markup=status_kb(),
+                )
+            except Exception:
+                await send_rich_message(update, ctx, final_html, status_kb(), edit=bool(update.callback_query))
+        else:
+            await send_rich_message(update, ctx, final_html, status_kb())
 # ── /session ─────────────────────────────────────────────────────────────────
 async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update):
