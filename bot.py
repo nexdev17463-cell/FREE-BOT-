@@ -116,11 +116,40 @@ def status_kb() -> InlineKeyboardMarkup:
     ])
 
 
+# Telegram Custom Emoji IDs collected from the user's Premium emoji pack.
+# Unicode alternatives remain inside each tag as a compatibility fallback.
+CUSTOM_EMOJI_IDS = {
+    "👑": "6321314543922323466",
+    "💎": "6264791387032523779",
+    "⚡": "5456140674028019486",
+    "❌": "6321108381197147408",
+    "🚀": "5188481279963715781",
+    "🤖": "5287684458881756303",
+    "🔤": "5870972873450984431",
+    "🔑": "5420094143089111506",
+    "🟪": "6276238759071586100",
+    "✅": "5190782321577441092",
+    "📊": "5042290883949495533",
+    "🆙": "5375338737028841420",
+    "⚠️": "6275791747465352530",
+    "🛡️": "5042328396193864923",
+}
+
+def apply_custom_emojis(rich_html: str) -> str:
+    """Replace collected Unicode emoji with Telegram custom-emoji HTML tags."""
+    for emoji, custom_id in sorted(CUSTOM_EMOJI_IDS.items(), key=lambda item: len(item[0]), reverse=True):
+        rich_html = rich_html.replace(
+            emoji,
+            f'<tg-emoji emoji-id="{custom_id}">{emoji}</tg-emoji>'
+        )
+    return rich_html
+
 # ── Premium message presentation (UI only) ───────────────────────────────────
 async def send_rich_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
                             rich_html: str, reply_markup=None, edit: bool = False):
     """Render safe informational UI with Telegram Rich Messages; keep a HTML fallback."""
     chat_id = update.effective_chat.id
+    rich_html = apply_custom_emojis(rich_html)
     api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
     payload = {
         "chat_id": chat_id,
@@ -147,6 +176,7 @@ async def send_rich_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
 
     plain_html = re.sub(r"<(h[1-6]|p|div|footer|table|tr|th|td|hr|mark)[^>]*>", "", rich_html)
     plain_html = re.sub(r"</(h[1-6]|p|div|footer|table|tr|th|td|mark)>", "\\n", plain_html)
+    plain_html = re.sub(r"</?tg-emoji[^>]*>", "", plain_html)
     plain_html = plain_html.replace("<hr/>", "\\n━━━━━━━━━━━━━━━━━━\\n")
     if edit and update.callback_query:
         await update.callback_query.edit_message_text(
