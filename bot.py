@@ -210,6 +210,22 @@ def status_kb() -> InlineKeyboardMarkup:
     ])
 
 
+def status_view_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("🟢 Active View", "status_view:active"), btn("🔴 Expired View", "status_view:expired")],
+        [btn("📦 Total View", "status_view:total")],
+        [btn("🔄 Refresh", "refresh_status"), btn("🔙 Back", "back")],
+    ])
+
+
+def refresh_view_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("🟢 Active View", "refresh_view:active"), btn("🔴 Expired View", "refresh_view:expired")],
+        [btn("⚠️ Errors View", "refresh_view:errors"), btn("🎁 Checked View", "refresh_view:checked")],
+        [btn("🔄 Refresh Again", "refresh_status"), btn("🔙 Back", "back")],
+    ])
+
+
 # Telegram Custom Emoji IDs collected from the user's Premium emoji pack.
 # Unicode alternatives remain inside each tag as a compatibility fallback.
 CUSTOM_EMOJI_IDS = {
@@ -359,6 +375,33 @@ async def _rich_edit_by_id(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
             )
         except Exception as exc2:
             logging.warning("Fallback edit also failed: %s", exc2)
+
+
+# ── Rich blocks send helper (returns message_id; HTML fallback) ──────────────
+async def _rich_send_blocks_new(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
+                                blocks: list, fallback_html: str,
+                                reply_markup=None, fallback_text: str = None) -> int:
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    payload = {"chat_id": chat_id, "rich_message": {"blocks": blocks}}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup.to_dict()
+    try:
+        timeout = aiohttp.ClientTimeout(total=20)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(api_base + "sendRichMessage", json=payload) as response:
+                result = await response.json(content_type=None)
+                if not response.ok or not result.get("ok"):
+                    raise RuntimeError(result.get("description", "Rich blocks send failed"))
+                return result["result"]["message_id"]
+    except Exception as exc:
+        logging.warning("Rich blocks send unavailable; using HTML fallback: %s", exc)
+        msg = await ctx.bot.send_message(
+            chat_id=chat_id,
+            text=fallback_text or fallback_html,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
+        )
+        return msg.message_id
 
 
 # ── Rich send helper (returns message_id; HTML fallback) ─────────────────────
@@ -599,25 +642,23 @@ async def host_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── /status ──────────────────────────────────────────────────────────────────
 def build_status_summary_blocks(counts: dict):
-    # Small-cap label gives the VIEW control a distinctive compact style.
     rows = [
         ("🟢 Active", counts["active"], "success", "status_view:active"),
         ("🔴 Expired", counts["expired"], "danger", "status_view:expired"),
         ("📦 Total", counts["total"], "primary", "status_view:total"),
     ]
-    cells = [
-        [{"text": "STATUS", "is_header": True},
-         {"text": "COUNT", "is_header": True, "align": "center"}]
-    ]
+    cells = [[
+        {"text": "STATUS", "is_header": True},
+        {"text": "COUNT", "is_header": True, "align": "center"},
+        {"text": "DETAILS", "is_header": True, "align": "center"},
+    ]]
     for label, count, style, callback in rows:
         cells.append([
             {"text": label},
-            {"text": [
-                {"type": "bold", "text": str(count)},
-                {"type": "button", "button": {
-                    "text": "ᴠɪᴇᴡ", "style": style, "callback_data": callback
-                }},
-            ], "align": "center"},
+            {"text": str(count), "align": "center"},
+            {"text": [{"type": "button", "button": {
+                "text": "ᴠɪᴇᴡ", "style": style, "callback_data": callback
+            }}], "align": "center"},
         ])
     return [
         {"type": "heading", "size": 1, "text": "📊 ACCOUNT STATUS"},
@@ -653,30 +694,48 @@ async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "expired": sum(1 for item in records if not item.get("active", False)),
         "total": len(records),
     }
+    cached = {
+        "owner_id": update.effective_user.id,
+        "counts": counts,
+        "active": [item.get("phone", "Unknown") for item in records if item.get("active", False)],
+        "expired": [item.get("phone", "Unknown") for item in records if not item.get("active", False)],
+        "total": [item.get("phone", "Unknown") for item in records],
+    }
+    rich_fallback = (
+        "<h1>📊 ACCOUNT STATUS</h1><p><i>Live session overview</i></p><hr/>"
+        "<table bordered striped><tr><th>STATUS</th><th>COUNT</th><th>DETAILS</th></tr>"
+        f"<tr><td>🟢 Active</td><td><b>{counts['active']}</b></td><td>ᴠɪᴇᴡ</td></tr>"
+        f"<tr><td>🔴 Expired</td><td><b>{counts['expired']}</b></td><td>ᴠɪᴇᴡ</td></tr>"
+        f"<tr><td>📦 Total</td><td><b>{counts['total']}</b></td><td>ᴠɪᴇᴡ</td></tr></table>"
+        "<footer>Session statistics</footer>"
+    )
     if update.callback_query and update.callback_query.message:
         message_id = update.callback_query.message.message_id
         chat_id = update.callback_query.message.chat_id
-        ctx.application.bot_data[f"status:{chat_id}:{message_id}"] = {
-            "owner_id": update.effective_user.id,
-            "counts": counts,
-            "active": [item.get("phone", "Unknown") for item in records if item.get("active", False)],
-            "expired": [item.get("phone", "Unknown") for item in records if not item.get("active", False)],
-            "total": [item.get("phone", "Unknown") for item in records],
-        }
+        ctx.application.bot_data[f"status:{chat_id}:{message_id}"] = cached
         try:
             await edit_status_summary(ctx, chat_id, message_id, counts)
             return
         except Exception as exc:
-            logging.debug("Rich status buttons unavailable; using existing status panel: %s", exc)
-    rich = (
-        "<h1>📊 ACCOUNT STATUS</h1><p><i>Live session overview</i></p><hr/>"
-        "<table bordered striped><tr><th>STATUS</th><th>COUNT</th></tr>"
-        f"<tr><td>🟢 Active</td><td><b>{counts['active']}</b></td></tr>"
-        f"<tr><td>🔴 Expired</td><td><b>{counts['expired']}</b></td></tr>"
-        f"<tr><td>📦 Total</td><td><b>{counts['total']}</b></td></tr></table>"
-        "<footer>Session statistics</footer>"
+            logging.debug("Rich status summary edit unavailable; using fallback: %s", exc)
+            await update.callback_query.edit_message_text(
+                rich_fallback, parse_mode=ParseMode.HTML, reply_markup=status_view_kb()
+            )
+            return
+
+    chat_id = update.effective_chat.id
+    fallback_text = (
+        "📊 <b>ACCOUNT STATUS</b>\n\n"
+        f"🟢 Active: <code>{counts['active']}</code>\n"
+        f"🔴 Expired: <code>{counts['expired']}</code>\n"
+        f"📦 Total: <code>{counts['total']}</code>"
     )
-    await send_rich_message(update, ctx, rich, status_kb(), edit=bool(update.callback_query))
+    message_id = await _rich_send_blocks_new(
+        ctx, chat_id, build_status_summary_blocks(counts),
+        rich_fallback, status_view_kb(), fallback_text
+    )
+    if message_id is not None:
+        ctx.application.bot_data[f"status:{chat_id}:{message_id}"] = cached
 
 def build_refresh_summary_blocks(result: dict):
     rows = [
@@ -686,18 +745,17 @@ def build_refresh_summary_blocks(result: dict):
         ("🎁 CHECKED", result["checked"], "primary", "refresh_view:checked"),
     ]
     cells = [[
-        {"text": "RESULT", "is_header": True},
+        {"text": "STATUS", "is_header": True},
         {"text": "COUNT", "is_header": True, "align": "center"},
+        {"text": "DETAILS", "is_header": True, "align": "center"},
     ]]
     for label, count, style, callback in rows:
         cells.append([
             {"text": label},
-            {"text": [
-                {"type": "bold", "text": str(count)},
-                {"type": "button", "button": {
-                    "text": "ᴠɪᴇᴡ", "style": style, "callback_data": callback
-                }},
-            ], "align": "center"},
+            {"text": str(count), "align": "center"},
+            {"text": [{"type": "button", "button": {
+                "text": "ᴠɪᴇᴡ", "style": style, "callback_data": callback
+            }}], "align": "center"},
         ])
     return [
         {"type": "heading", "size": 1, "text": "⭐ SESSION REFRESH COMPLETE"},
@@ -974,11 +1032,11 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     final_html = (
         "<h1>⭐ SESSION REFRESH COMPLETE</h1>"
         "<p><i>All available session checks have finished.</i></p><hr/>"
-        "<table bordered striped><tr><th>RESULT</th><th>COUNT</th></tr>"
-        f"<tr><td>🟢 ACTIVE</td><td><b>{result['active']}</b></td></tr>"
-        f"<tr><td>🔴 EXPIRED</td><td><b>{result['expired']}</b></td></tr>"
-        f"<tr><td>⚠️ ERRORS</td><td><b>{result['errors']}</b></td></tr>"
-        f"<tr><td>🎁 CHECKED</td><td><b>{result['checked']}</b></td></tr>"
+        "<table bordered striped><tr><th>STATUS</th><th>COUNT</th><th>DETAILS</th></tr>"
+        f"<tr><td>🟢 ACTIVE</td><td><b>{result['active']}</b></td><td>ᴠɪᴇᴡ</td></tr>"
+        f"<tr><td>🔴 EXPIRED</td><td><b>{result['expired']}</b></td><td>ᴠɪᴇᴡ</td></tr>"
+        f"<tr><td>⚠️ ERRORS</td><td><b>{result['errors']}</b></td><td>ᴠɪᴇᴡ</td></tr>"
+        f"<tr><td>🎁 CHECKED</td><td><b>{result['checked']}</b></td><td>ᴠɪᴇᴡ</td></tr>"
         "</table>"
         "<footer>🔐 Account numbers were kept private during verification</footer>"
     )
@@ -1008,12 +1066,12 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             try:
                 await ctx.bot.edit_message_text(
                     chat_id=chat_id, message_id=progress_message_id,
-                    text=final_text, reply_markup=status_kb()
+                    text=final_text, reply_markup=refresh_view_kb()
                 )
             except Exception:
-                await send_rich_message(update, ctx, final_html, status_kb(), edit=bool(update.callback_query))
+                await send_rich_message(update, ctx, final_html, refresh_view_kb(), edit=bool(update.callback_query))
         else:
-            await send_rich_message(update, ctx, final_html, status_kb())
+            await send_rich_message(update, ctx, final_html, refresh_view_kb())
 
 # ── /session ─────────────────────────────────────────────────────────────────
 async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
