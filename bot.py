@@ -695,7 +695,7 @@ def build_refresh_summary_blocks(result: dict):
             {"text": [
                 {"type": "bold", "text": str(count)},
                 {"type": "button", "button": {
-                    "text": "VIEW", "style": style, "callback_data": callback
+                    "text": "ᴠɪᴇᴡ", "style": style, "callback_data": callback
                 }},
             ], "align": "center"},
         ])
