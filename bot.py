@@ -615,7 +615,7 @@ def build_status_summary_blocks(counts: dict):
             {"text": [
                 {"type": "bold", "text": str(count)},
                 {"type": "button", "button": {
-                    "text": "↗ ᴠɪᴇᴡ", "style": style, "callback_data": callback
+                    "text": "- ↗ ᴠɪᴇᴡ", "style": style, "callback_data": callback
                 }},
             ], "align": "center"},
         ])
