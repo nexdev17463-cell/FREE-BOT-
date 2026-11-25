@@ -186,22 +186,6 @@ def btn(text: str, data: str) -> InlineKeyboardButton:
     )
 
 
-def btn_with_visible_emoji(text: str, data: str) -> InlineKeyboardButton:
-    """Keep the Unicode emoji visible if a Telegram client hides button icon artwork."""
-    icon_custom_emoji_id = None
-    for emoji, custom_id in sorted(
-        _BUTTON_CUSTOM_EMOJI_IDS.items(), key=lambda item: len(item[0]), reverse=True
-    ):
-        if text.startswith(emoji):
-            icon_custom_emoji_id = custom_id
-            break
-    return InlineKeyboardButton(
-        text.translate(_BUTTON_SMALL_CAPS),
-        callback_data=data,
-        style=random.choice(_BTN_STYLES),
-        icon_custom_emoji_id=icon_custom_emoji_id,
-    )
-
 def main_menu_kb() -> InlineKeyboardMarkup:
     developer_button = InlineKeyboardButton(
         "◈ 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ◈",
@@ -211,9 +195,9 @@ def main_menu_kb() -> InlineKeyboardMarkup:
     )
 
     return InlineKeyboardMarkup([
-        [btn("➕ Add Account", "add_account"), btn_with_visible_emoji("📊 Status", "status")],
+        [btn("➕ Add Account", "add_account"), btn("📊 Status", "status")],
         [btn("🚨 Mass Report", "start_report"), btn("📋 Sessions", "sessions")],
-        [btn_with_visible_emoji("🔄 Refresh Sessions", "refresh_status"), btn("❔ Help", "help")],
+        [btn("🔄 Refresh Sessions", "refresh_status"), btn("❔ Help", "help")],
         [developer_button],
     ])
 
@@ -222,7 +206,7 @@ def cancel_kb() -> InlineKeyboardMarkup:
 
 def status_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [btn_with_visible_emoji("🔄 Refresh", "refresh_status")],
+        [btn("🔄 Refresh", "refresh_status")],
         [btn("🔴 Expired IDs", "expired_ids"), btn("🔙 Back", "back")],
     ])
 
@@ -239,7 +223,7 @@ def refresh_view_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [btn("🟢 Active View", "refresh_view:active"), btn("🔴 Expired View", "refresh_view:expired")],
         [btn("⚠️ Errors View", "refresh_view:errors"), btn("🎁 Checked View", "refresh_view:checked")],
-        [btn_with_visible_emoji("🔄 Refresh Again", "refresh_status"), btn("🔙 Back", "back")],
+        [btn("🔄 Refresh Again", "refresh_status"), btn("🔙 Back", "back")],
     ])
 
 
@@ -659,6 +643,35 @@ async def host_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ── /status ──────────────────────────────────────────────────────────────────
+
+def rich_text_with_custom_emojis(value: str):
+    """Build RichText parts so message-body emojis render as Telegram custom emojis."""
+    parts = []
+    remaining = str(value)
+    emoji_items = sorted(CUSTOM_EMOJI_IDS.items(), key=lambda item: len(item[0]), reverse=True)
+    while remaining:
+        match = None
+        match_pos = len(remaining)
+        for emoji, custom_id in emoji_items:
+            pos = remaining.find(emoji)
+            if pos != -1 and pos < match_pos:
+                match = (emoji, custom_id)
+                match_pos = pos
+        if match is None:
+            parts.append(remaining)
+            break
+        emoji, custom_id = match
+        if match_pos:
+            parts.append(remaining[:match_pos])
+        parts.append({
+            "type": "custom_emoji",
+            "custom_emoji_id": custom_id,
+            "alternative_text": emoji,
+        })
+        remaining = remaining[match_pos + len(emoji):]
+    return parts or [str(value)]
+
+
 def build_status_summary_blocks(counts: dict):
     rows = [
         ("🟢 Active", counts["active"], "success", "status_view:active"),
@@ -672,14 +685,14 @@ def build_status_summary_blocks(counts: dict):
     ]]
     for label, count, style, callback in rows:
         cells.append([
-            {"text": label},
+            {"text": rich_text_with_custom_emojis(label)},
             {"text": str(count), "align": "center"},
             {"text": [{"type": "button", "button": {
                 "text": "ᴠɪᴇᴡ", "style": style, "callback_data": callback
             }}], "align": "center"},
         ])
     return [
-        {"type": "heading", "size": 1, "text": "📊 ACCOUNT STATUS"},
+        {"type": "heading", "size": 1, "text": rich_text_with_custom_emojis("📊 ACCOUNT STATUS")},
         {"type": "paragraph", "text": "Live session overview"},
         {"type": "divider"},
         {"type": "table", "cells": cells, "is_bordered": True, "is_striped": True},
@@ -777,11 +790,11 @@ def build_refresh_summary_blocks(result: dict):
             }}], "align": "center"},
         ])
     return [
-        {"type": "heading", "size": 1, "text": "⭐ SESSION REFRESH COMPLETE"},
+        {"type": "heading", "size": 1, "text": rich_text_with_custom_emojis("⭐ SESSION REFRESH COMPLETE")},
         {"type": "paragraph", "text": "All available session checks have finished."},
         {"type": "divider"},
         {"type": "table", "cells": cells, "is_bordered": True, "is_striped": True},
-        {"type": "footer", "text": "🔐 Account numbers were kept private during verification"},
+        {"type": "footer", "text": rich_text_with_custom_emojis("🔐 Account numbers were kept private during verification")},
     ]
 
 
