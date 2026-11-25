@@ -15,7 +15,7 @@ from config import BOT_TOKEN, API_ID, API_HASH, OWNER_ID, OWNER_USERNAME
 from session_manager import (
     save_session, get_all_sessions, delete_session,
     get_total_count, get_active_count, get_expired_count,
-    get_expired_sessions, refresh_all_sessions
+    get_expired_sessions, get_all_status_sessions, refresh_all_sessions
 )
 from access_manager import (
     is_owner, is_sudo, remember_user, add_sudo, remove_sudo, list_access_users
@@ -598,18 +598,82 @@ async def host_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ── /status ──────────────────────────────────────────────────────────────────
+def build_status_summary_blocks(counts: dict):
+    # Small-cap label gives the VIEW control a distinctive compact style.
+    rows = [
+        ("🟢 Active", counts["active"], "success", "status_view:active"),
+        ("🔴 Expired", counts["expired"], "danger", "status_view:expired"),
+        ("📦 Total", counts["total"], "primary", "status_view:total"),
+    ]
+    cells = [
+        [{"text": "STATUS", "is_header": True},
+         {"text": "COUNT", "is_header": True, "align": "center"}]
+    ]
+    for label, count, style, callback in rows:
+        cells.append([
+            {"text": label},
+            {"text": [
+                {"type": "bold", "text": str(count)},
+                {"type": "button", "button": {
+                    "text": "↗ ᴠɪᴇᴡ", "style": style, "callback_data": callback
+                }},
+            ], "align": "center"},
+        ])
+    return [
+        {"type": "heading", "size": 1, "text": "📊 ACCOUNT STATUS"},
+        {"type": "paragraph", "text": "Live session overview"},
+        {"type": "divider"},
+        {"type": "table", "cells": cells, "is_bordered": True, "is_striped": True},
+        {"type": "footer", "text": "Session statistics"},
+    ]
+
+
+async def edit_status_summary(ctx, chat_id: int, message_id: int, counts: dict):
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "rich_message": {"blocks": build_status_summary_blocks(counts)},
+        "reply_markup": status_kb().to_dict(),
+    }
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(api_base + "editMessageText", json=payload) as response:
+            data = await response.json(content_type=None)
+            if not response.ok or not data.get("ok"):
+                raise RuntimeError(data.get("description", "Status summary edit failed"))
+
+
 async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update, ctx):
         return
-    total = await get_total_count()
-    active = await get_active_count()
-    expired = await get_expired_count()
+    records = await get_all_status_sessions()
+    counts = {
+        "active": sum(1 for item in records if item.get("active", False)),
+        "expired": sum(1 for item in records if not item.get("active", False)),
+        "total": len(records),
+    }
+    if update.callback_query and update.callback_query.message:
+        message_id = update.callback_query.message.message_id
+        chat_id = update.callback_query.message.chat_id
+        ctx.application.bot_data[f"status:{chat_id}:{message_id}"] = {
+            "owner_id": update.effective_user.id,
+            "counts": counts,
+            "active": [item.get("phone", "Unknown") for item in records if item.get("active", False)],
+            "expired": [item.get("phone", "Unknown") for item in records if not item.get("active", False)],
+            "total": [item.get("phone", "Unknown") for item in records],
+        }
+        try:
+            await edit_status_summary(ctx, chat_id, message_id, counts)
+            return
+        except Exception as exc:
+            logging.debug("Rich status buttons unavailable; using existing status panel: %s", exc)
     rich = (
         "<h1>📊 ACCOUNT STATUS</h1><p><i>Live session overview</i></p><hr/>"
         "<table bordered striped><tr><th>STATUS</th><th>COUNT</th></tr>"
-        f"<tr><td>🟢 Active</td><td><b>{active}</b></td></tr>"
-        f"<tr><td>🔴 Expired</td><td><b>{expired}</b></td></tr>"
-        f"<tr><td>📦 Total</td><td><b>{total}</b></td></tr></table>"
+        f"<tr><td>🟢 Active</td><td><b>{counts['active']}</b></td></tr>"
+        f"<tr><td>🔴 Expired</td><td><b>{counts['expired']}</b></td></tr>"
+        f"<tr><td>📦 Total</td><td><b>{counts['total']}</b></td></tr></table>"
         "<footer>Session statistics</footer>"
     )
     await send_rich_message(update, ctx, rich, status_kb(), edit=bool(update.callback_query))
@@ -1174,6 +1238,42 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             main_menu_kb(), edit=True
         )
         return ConversationHandler.END
+
+    if data.startswith("status_view:") or data == "status_summary":
+        message = q.message
+        if not message:
+            await q.answer("This message is no longer available.", show_alert=True)
+            return
+        cache_key = f"status:{message.chat_id}:{message.message_id}"
+        cached = ctx.application.bot_data.get(cache_key)
+        if not cached or cached.get("owner_id") != uid:
+            await q.answer("Status details expired. Open Status again.", show_alert=True)
+            return
+        if data == "status_summary":
+            try:
+                await edit_status_summary(ctx, message.chat_id, message.message_id, cached["counts"])
+            except Exception as exc:
+                logging.warning("Could not restore status summary: %s", exc)
+                await q.answer("Could not restore status summary.", show_alert=True)
+            return
+        category = data.split(":", 1)[1]
+        titles = {
+            "active": "🟢 ACTIVE ACCOUNTS",
+            "expired": "🔴 EXPIRED ACCOUNTS",
+            "total": "📦 ALL SAVED ACCOUNTS",
+        }
+        if category not in titles:
+            return
+        ids = cached.get(category, [])
+        body = "".join(
+            f"<p><b>{index}. <code>{html.escape(str(phone))}</code></b></p>"
+            for index, phone in enumerate(ids, 1)
+        ) if ids else "<p>No accounts found in this category.</p>"
+        await send_rich_message(
+            update, ctx, f"<h1>{titles[category]}</h1><hr/>{body}",
+            InlineKeyboardMarkup([[btn("🔙 Back", "status_summary")]]), edit=True
+        )
+        return
 
     if data == "status":
         await status_cmd(update, ctx)
