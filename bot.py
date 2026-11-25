@@ -614,6 +614,52 @@ async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
     await send_rich_message(update, ctx, rich, status_kb(), edit=bool(update.callback_query))
 
+def build_refresh_summary_blocks(result: dict):
+    rows = [
+        ("🟢 ACTIVE", result["active"], "success", "refresh_view:active"),
+        ("🔴 EXPIRED", result["expired"], "danger", "refresh_view:expired"),
+        ("⚠️ ERRORS", result["errors"], "danger", "refresh_view:errors"),
+        ("🎁 CHECKED", result["checked"], "primary", "refresh_view:checked"),
+    ]
+    cells = [[
+        {"text": "RESULT", "is_header": True},
+        {"text": "COUNT", "is_header": True, "align": "center"},
+    ]]
+    for label, count, style, callback in rows:
+        cells.append([
+            {"text": label},
+            {"text": [
+                {"type": "bold", "text": str(count)},
+                {"type": "button", "button": {
+                    "text": "VIEW", "style": style, "callback_data": callback
+                }},
+            ], "align": "center"},
+        ])
+    return [
+        {"type": "heading", "size": 1, "text": "⭐ SESSION REFRESH COMPLETE"},
+        {"type": "paragraph", "text": "All available session checks have finished."},
+        {"type": "divider"},
+        {"type": "table", "cells": cells, "is_bordered": True, "is_striped": True},
+        {"type": "footer", "text": "🔐 Account numbers were kept private during verification"},
+    ]
+
+
+async def edit_refresh_summary(ctx, chat_id: int, message_id: int, result: dict):
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "rich_message": {"blocks": build_refresh_summary_blocks(result)},
+        "reply_markup": status_kb().to_dict(),
+    }
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(api_base + "editMessageText", json=payload) as response:
+            data = await response.json(content_type=None)
+            if not response.ok or not data.get("ok"):
+                raise RuntimeError(data.get("description", "Rich summary edit failed"))
+
+
 # ── /refresh ─────────────────────────────────────────────────────────────────
 async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update, ctx):
@@ -710,60 +756,50 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
     result = await refresh_all_sessions(on_progress=report_progress)
-    summary_rows = [
-        ("🟢", "ACTIVE", result["active"]),
-        ("🔴", "EXPIRED", result["expired"]),
-        ("⚠️", "ERRORS", result["errors"]),
-        ("📦", "CHECKED", result["checked"]),
-    ]
-    summary_table = "".join(
-        f"<tr><td>{icon} {label}</td><td><b>{count}</b></td></tr>"
-        for icon, label, count in summary_rows
-    )
     final_html = (
         "<h1>⭐ SESSION REFRESH COMPLETE</h1>"
         "<p><i>All available session checks have finished.</i></p><hr/>"
         "<table bordered striped><tr><th>RESULT</th><th>COUNT</th></tr>"
-        f"{summary_table}</table>"
+        f"<tr><td>🟢 ACTIVE</td><td><b>{result['active']}</b></td></tr>"
+        f"<tr><td>🔴 EXPIRED</td><td><b>{result['expired']}</b></td></tr>"
+        f"<tr><td>⚠️ ERRORS</td><td><b>{result['errors']}</b></td></tr>"
+        f"<tr><td>🎁 CHECKED</td><td><b>{result['checked']}</b></td></tr>"
+        "</table>"
         "<footer>🔐 Account numbers were kept private during verification</footer>"
     )
     final_text = (
-        "⭐ SESSION REFRESH COMPLETE\n\n"
-        f"🟢 Active: {result['active']}\n"
-        f"🔴 Expired: {result['expired']}\n"
-        f"⚠️ Errors: {result['errors']}\n"
-        f"📦 Checked: {result['checked']}"
+        "⭐ SESSION REFRESH COMPLETE\\n\\n"
+        f"🟢 ACTIVE: {result['active']}\\n"
+        f"🔴 EXPIRED: {result['expired']}\\n"
+        f"⚠️ ERRORS: {result['errors']}\\n"
+        f"🎁 CHECKED: {result['checked']}"
     )
-
-    # Replace the live panel with the final rich summary and restore the menu.
-    try:
-        rich_html = apply_custom_emojis(final_html)
-        payload = {
-            "chat_id": chat_id,
-            "message_id": progress_message_id,
-            "rich_message": {"html": rich_html},
-            "reply_markup": status_kb().to_dict(),
+    if progress_message_id is not None:
+        ctx.application.bot_data[f"refresh:{chat_id}:{progress_message_id}"] = {
+            "owner_id": update.effective_user.id,
+            "active": result.get("active_ids", []),
+            "expired": result.get("expired_ids", []),
+            "errors": result.get("error_ids", []),
+            "checked": result.get("checked_ids", []),
+            "counts": {k: result[k] for k in ("active", "expired", "errors", "checked")},
         }
-        timeout = aiohttp.ClientTimeout(total=15)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(api_base + "editMessageText", json=payload) as response:
-                result_json = await response.json(content_type=None)
-                if not response.ok or not result_json.get("ok"):
-                    raise RuntimeError(result_json.get("description", "Final rich panel update failed"))
+    try:
+        if progress_message_id is None:
+            raise RuntimeError("Refresh message ID unavailable")
+        await edit_refresh_summary(ctx, chat_id, progress_message_id, result)
     except Exception as exc:
-        logging.debug("Final rich panel update unavailable: %s", exc)
+        logging.debug("Rich refresh summary unavailable; using fallback: %s", exc)
         if progress_message_id is not None:
             try:
                 await ctx.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=progress_message_id,
-                    text=final_text,
-                    reply_markup=status_kb(),
+                    chat_id=chat_id, message_id=progress_message_id,
+                    text=final_text, reply_markup=status_kb()
                 )
             except Exception:
                 await send_rich_message(update, ctx, final_html, status_kb(), edit=bool(update.callback_query))
         else:
             await send_rich_message(update, ctx, final_html, status_kb())
+
 # ── /session ─────────────────────────────────────────────────────────────────
 async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update, ctx):
@@ -1145,6 +1181,43 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data == "refresh_status":
         await refresh_cmd(update, ctx)
+        return
+
+    if data.startswith("refresh_view:") or data == "refresh_summary":
+        message = q.message
+        if not message:
+            await q.answer("This message is no longer available.", show_alert=True)
+            return
+        cache_key = f"refresh:{message.chat_id}:{message.message_id}"
+        cached = ctx.application.bot_data.get(cache_key)
+        if not cached or cached.get("owner_id") != uid:
+            await q.answer("Refresh details expired. Please refresh sessions again.", show_alert=True)
+            return
+        if data == "refresh_summary":
+            try:
+                await edit_refresh_summary(ctx, message.chat_id, message.message_id, cached["counts"])
+            except Exception as exc:
+                logging.warning("Could not restore refresh summary: %s", exc)
+                await q.answer("Could not restore summary. Please try again.", show_alert=True)
+            return
+        category = data.split(":", 1)[1]
+        labels = {
+            "active": "🟢 ACTIVE SESSIONS",
+            "expired": "🔴 EXPIRED SESSIONS",
+            "errors": "⚠️ ERROR SESSIONS",
+            "checked": "🎁 CHECKED SESSIONS",
+        }
+        if category not in labels:
+            return
+        ids = cached.get(category, [])
+        body = "".join(
+            f"<p><b>{index}. <code>{html.escape(str(phone))}</code></b></p>"
+            for index, phone in enumerate(ids, 1)
+        ) if ids else "<p>No IDs found in this category.</p>"
+        await send_rich_message(
+            update, ctx, f"<h1>{labels[category]}</h1><hr/>{body}",
+            InlineKeyboardMarkup([[btn("🔙 Back", "refresh_summary")]]), edit=True
+        )
         return
 
     if data == "expired_ids":
