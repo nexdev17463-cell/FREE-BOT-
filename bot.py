@@ -20,7 +20,7 @@ from session_manager import (
 from access_manager import (
     is_owner, is_sudo, remember_user, add_sudo, remove_sudo, list_access_users
 )
-from reporter import mass_report, mass_join
+from reporter import mass_report, mass_join, mass_leave
 from proxy_manager import fetch_proxies, rotate_forever
 
 logging.basicConfig(level=logging.INFO)
@@ -724,6 +724,157 @@ async def edit_refresh_summary(ctx, chat_id: int, message_id: int, result: dict)
                 raise RuntimeError(data.get("description", "Rich summary edit failed"))
 
 
+# ── Join result summary (blocks with ᴠɪᴇᴡ buttons) ──────────────────────────
+def build_join_summary_blocks(join_result: dict, total: int, target: str) -> list:
+    rows = [
+        ("✅ Joined",        join_result["joined"],  "success", "join_view:joined"),
+        ("🔄 Already Member",join_result["already"], "primary", "join_view:already"),
+        ("❌ Failed",        join_result["failed"],  "danger",  "join_view:failed"),
+        ("👥 Total Accounts",total,                  "primary", "join_view:total"),
+    ]
+    cells = [[
+        {"text": "RESULT", "is_header": True},
+        {"text": "COUNT",  "is_header": True, "align": "center"},
+    ]]
+    for label, count, style, cb_data in rows:
+        cells.append([
+            {"text": label},
+            {"text": [
+                {"type": "bold", "text": str(count)},
+                {"type": "button", "button": {
+                    "text": "ᴠɪᴇᴡ", "style": style, "callback_data": cb_data,
+                }},
+            ], "align": "center"},
+        ])
+    return [
+        {"type": "heading", "size": 1, "text": "✅ JOIN COMPLETE"},
+        {"type": "paragraph", "text": f"All accounts processed for {target}"},
+        {"type": "divider"},
+        {"type": "table", "cells": cells, "is_bordered": True, "is_striped": True},
+        {"type": "footer", "text": "Join operation finished."},
+    ]
+
+
+async def edit_join_summary(ctx, chat_id: int, message_id: int,
+                            join_result: dict, total: int, target: str):
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "rich_message": {"blocks": build_join_summary_blocks(join_result, total, target)},
+        "reply_markup": main_menu_kb().to_dict(),
+    }
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(api_base + "editMessageText", json=payload) as response:
+            data = await response.json(content_type=None)
+            if not response.ok or not data.get("ok"):
+                raise RuntimeError(data.get("description", "Join summary edit failed"))
+
+
+# ── Report result summary (blocks with ᴠɪᴇᴡ buttons) ────────────────────────
+def build_report_summary_blocks(result: dict, target: str, total_ids: int, count: int) -> list:
+    rows = [
+        ("✅ Success",    result["success"],    "success", "report_view:success"),
+        ("❌ Failed",     result["failed"],     "danger",  "report_view:failed"),
+        ("🔴 Expired",   result["expired"],    "danger",  "report_view:expired"),
+        ("👥 Total IDs", total_ids,            "primary", "report_view:total"),
+        ("📊 Total Reports", total_ids * count, None,     None),
+    ]
+    cells = [[
+        {"text": "RESULT", "is_header": True},
+        {"text": "COUNT",  "is_header": True, "align": "center"},
+    ]]
+    for label, count_val, style, cb_data in rows:
+        if cb_data:
+            count_cell = {"text": [
+                {"type": "bold", "text": str(count_val)},
+                {"type": "button", "button": {
+                    "text": "ᴠɪᴇᴡ", "style": style, "callback_data": cb_data,
+                }},
+            ], "align": "center"}
+        else:
+            count_cell = {"text": str(count_val), "align": "center"}
+        cells.append([{"text": label}, count_cell])
+    blocks = [
+        {"type": "heading",  "size": 1, "text": "📊 REPORT COMPLETE"},
+        {"type": "paragraph","text": f"Mass report finished · Target: {target}"},
+        {"type": "divider"},
+        {"type": "table", "cells": cells, "is_bordered": True, "is_striped": True},
+    ]
+    if result.get("errors"):
+        unique = list(set(result["errors"]))[:5]
+        err_items = [{"type": "paragraph", "text": e} for e in unique]
+        blocks += [{"type": "heading", "size": 3, "text": "⚠️ ERRORS"}] + err_items
+    blocks.append({"type": "footer", "text": "Report session complete."})
+    return blocks
+
+
+async def edit_report_summary(ctx, chat_id: int, message_id: int,
+                              result: dict, target: str, total_ids: int, count: int):
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "rich_message": {"blocks": build_report_summary_blocks(result, target, total_ids, count)},
+        "reply_markup": main_menu_kb().to_dict(),
+    }
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(api_base + "editMessageText", json=payload) as response:
+            data = await response.json(content_type=None)
+            if not response.ok or not data.get("ok"):
+                raise RuntimeError(data.get("description", "Report summary edit failed"))
+
+
+# ── Leave result summary (blocks with ᴠɪᴇᴡ buttons) ─────────────────────────
+def build_leave_summary_blocks(leave_result: dict, total: int, target: str) -> list:
+    rows = [
+        ("🟢 Leaved",        leave_result["leaved"],    "success", "leave_view:leaved"),
+        ("🟡 No Member",     leave_result["no_member"], "primary", "leave_view:no_member"),
+        ("🔴 Failed",        leave_result["failed"],    "danger",  "leave_view:failed"),
+        ("📦 Total Accounts",total,                     "primary", "leave_view:total"),
+    ]
+    cells = [[
+        {"text": "RESULT", "is_header": True},
+        {"text": "COUNT",  "is_header": True, "align": "center"},
+    ]]
+    for label, count, style, cb_data in rows:
+        cells.append([
+            {"text": label},
+            {"text": [
+                {"type": "bold", "text": str(count)},
+                {"type": "button", "button": {
+                    "text": "ᴠɪᴇᴡ", "style": style, "callback_data": cb_data,
+                }},
+            ], "align": "center"},
+        ])
+    return [
+        {"type": "heading",  "size": 1, "text": "🚪 LEAVE COMPLETE"},
+        {"type": "paragraph","text": f"All accounts processed for {target}"},
+        {"type": "divider"},
+        {"type": "table", "cells": cells, "is_bordered": True, "is_striped": True},
+        {"type": "footer", "text": "Leave operation finished."},
+    ]
+
+
+async def edit_leave_summary(ctx, chat_id: int, message_id: int,
+                             leave_result: dict, total: int, target: str):
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "rich_message": {"blocks": build_leave_summary_blocks(leave_result, total, target)},
+        "reply_markup": main_menu_kb().to_dict(),
+    }
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(api_base + "editMessageText", json=payload) as response:
+            data = await response.json(content_type=None)
+            if not response.ok or not data.get("ok"):
+                raise RuntimeError(data.get("description", "Leave summary edit failed"))
+
+
 # ── /refresh ─────────────────────────────────────────────────────────────────
 async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update, ctx):
@@ -987,33 +1138,182 @@ async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     join_result = await mass_join(sessions, target, progress_cb=cb)
 
-    rich_done = (
-        "<h1>✅ JOIN COMPLETE</h1>"
-        f"<p><i>All accounts processed for <code>{html.escape(target)}</code></i></p><hr/>"
+    # Store result data for ᴠɪᴇᴡ button navigation
+    all_phones = [s.get("phone", "?") for s in sessions]
+    ctx.application.bot_data[f"join:{chat_id}:{msg_id}"] = {
+        "owner_id":   update.effective_user.id,
+        "target":     target,
+        "total":      total,
+        "counts":     {k: join_result[k] for k in ("joined", "already", "failed")},
+        "joined":     join_result.get("joined_ids", []),
+        "already":    join_result.get("already_ids", []),
+        "failed":     join_result.get("failed_ids_arr", []),
+        "total_list": all_phones,
+    }
+    try:
+        await edit_join_summary(ctx, chat_id, msg_id, join_result, total, target)
+    except Exception as exc:
+        logging.debug("Rich join summary blocks unavailable; using HTML fallback: %s", exc)
+        rich_done = (
+            "<h1>✅ JOIN COMPLETE</h1>"
+            f"<p><i>All accounts processed for <code>{html.escape(target)}</code></i></p><hr/>"
+            "<table bordered striped>"
+            "<tr><th>RESULT</th><th>COUNT</th></tr>"
+            f"<tr><td>✅ Joined</td><td><b>{join_result['joined']}</b></td></tr>"
+            f"<tr><td>🔄 Already Member</td><td><b>{join_result['already']}</b></td></tr>"
+            f"<tr><td>❌ Failed</td><td><b>{join_result['failed']}</b></td></tr>"
+            f"<tr><td>👥 Total Accounts</td><td><b>{total}</b></td></tr>"
+            "</table>"
+            "<footer>Join operation finished.</footer>"
+        )
+        fallback_done = (
+            "╔══════════════════╗\n"
+            "║    ✅ JOIN DONE   ║\n"
+            "╚══════════════════╝\n\n"
+            f"🎯 Target  : <code>{html.escape(target)}</code>\n"
+            f"✅ Joined  : <code>{join_result['joined']}</code>\n"
+            f"🔄 Already : <code>{join_result['already']}</code>\n"
+            f"❌ Failed  : <code>{join_result['failed']}</code>\n"
+            f"👥 Total   : <code>{total}</code>"
+        )
+        await _rich_edit_by_id(
+            ctx, chat_id, msg_id,
+            rich_done, main_menu_kb(),
+            fallback_done, main_menu_kb()
+        )
+
+
+# ── /leave ───────────────────────────────────────────────────────────────────
+async def leave_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await require_access(update, ctx):
+        return
+    if not ctx.args:
+        await send_rich_message(
+            update, ctx,
+            "<h2>🚪 LEAVE CHAT</h2>"
+            "<p>Leave a group or channel with all authorized accounts.</p><hr/>"
+            "<h3>🎯 Supported Target Formats</h3>"
+            "<table bordered striped>"
+            "<tr><th>TYPE</th><th>FORMAT</th></tr>"
+            "<tr><td>Username</td><td><code>@groupusername</code></td></tr>"
+            "<tr><td>Public link</td><td><code>https://t.me/groupusername</code></td></tr>"
+            "<tr><td>Invite link</td><td><code>https://t.me/+INVITE_CODE</code></td></tr>"
+            "<tr><td>Chat ID</td><td><code>-1001234567890</code></td></tr>"
+            "</table>"
+            "<p>Examples:</p>"
+            "<p><code>/leave @groupusername</code></p>"
+            "<p><code>/leave https://t.me/+ABC123</code></p>"
+            "<p><code>/leave -1001234567890</code></p>",
+            main_menu_kb()
+        )
+        return
+
+    target   = ctx.args[0]
+    sessions = await get_all_sessions()
+    if not sessions:
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ NO ACTIVE SESSIONS</h2>"
+            "<p>Add accounts first before using the leave command.</p>",
+            main_menu_kb()
+        )
+        return
+
+    total    = len(sessions)
+    chat_id  = update.effective_chat.id
+
+    leave_initial_rich = (
+        "<h2>⏳ LEAVE IN PROGRESS</h2>"
+        f"<p><i>Target: <code>{html.escape(target)}</code></i></p><hr/>"
         "<table bordered striped>"
         "<tr><th>RESULT</th><th>COUNT</th></tr>"
-        f"<tr><td>✅ Joined</td><td><b>{join_result['joined']}</b></td></tr>"
-        f"<tr><td>🔄 Already Member</td><td><b>{join_result['already']}</b></td></tr>"
-        f"<tr><td>❌ Failed</td><td><b>{join_result['failed']}</b></td></tr>"
-        f"<tr><td>👥 Total Accounts</td><td><b>{total}</b></td></tr>"
+        "<tr><td>🟢 Leaved</td><td><b>0</b></td></tr>"
+        "<tr><td>🟡 No Member</td><td><b>0</b></td></tr>"
+        "<tr><td>🔴 Failed</td><td><b>0</b></td></tr>"
+        f"<tr><td>📊 Done</td><td><b>0 / {total}</b></td></tr>"
         "</table>"
-        "<footer>Join operation finished.</footer>"
     )
-    fallback_done = (
-        "╔══════════════════╗\n"
-        "║    ✅ JOIN DONE   ║\n"
-        "╚══════════════════╝\n\n"
-        f"🎯 Target  : <code>{html.escape(target)}</code>\n"
-        f"✅ Joined  : <code>{join_result['joined']}</code>\n"
-        f"🔄 Already : <code>{join_result['already']}</code>\n"
-        f"❌ Failed  : <code>{join_result['failed']}</code>\n"
-        f"👥 Total   : <code>{total}</code>"
+    leave_initial_fallback = (
+        f"⏳ <b>Leaving</b> <code>{html.escape(target)}</code>\n\n"
+        f"🟢 Leaved    : <code>0</code>\n"
+        f"🟡 No Member : <code>0</code>\n"
+        f"🔴 Failed    : <code>0</code>\n"
+        f"📊 Done      : <code>0 / {total}</code>"
     )
-    await _rich_edit_by_id(
-        ctx, chat_id, msg_id,
-        rich_done, main_menu_kb(),
-        fallback_done, main_menu_kb()
+    msg_id = await _rich_send_new(
+        ctx, chat_id, leave_initial_rich, None,
+        leave_initial_fallback
     )
+
+    last = {"t": 0}
+
+    async def cb(r):
+        now  = time.time()
+        done = r["leaved"] + r["no_member"] + r["failed"]
+        if now - last["t"] >= 1 or done >= total:
+            last["t"] = now
+            try:
+                await ctx.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    text=(
+                        f"⏳ <b>Leaving</b> <code>{html.escape(target)}</code>\n\n"
+                        f"🟢 Leaved    : <code>{r['leaved']}</code>\n"
+                        f"🟡 No Member : <code>{r['no_member']}</code>\n"
+                        f"🔴 Failed    : <code>{r['failed']}</code>\n"
+                        f"📊 Done      : <code>{done} / {total}</code>"
+                    ),
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                pass
+
+    leave_result = await mass_leave(sessions, target, progress_cb=cb)
+
+    # Store result data for ᴠɪᴇᴡ button navigation
+    all_phones = [s.get("phone", "?") for s in sessions]
+    ctx.application.bot_data[f"leave:{chat_id}:{msg_id}"] = {
+        "owner_id":    update.effective_user.id,
+        "target":      target,
+        "total":       total,
+        "counts":      {k: leave_result[k] for k in ("leaved", "no_member", "failed")},
+        "leaved":      leave_result.get("leaved_ids", []),
+        "no_member":   leave_result.get("no_member_ids", []),
+        "failed":      leave_result.get("failed_ids", []),
+        "total_list":  all_phones,
+    }
+
+    try:
+        await edit_leave_summary(ctx, chat_id, msg_id, leave_result, total, target)
+    except Exception as exc:
+        logging.debug("Rich leave summary blocks unavailable; using HTML fallback: %s", exc)
+        rich_done = (
+            "<h1>🚪 LEAVE COMPLETE</h1>"
+            f"<p><i>All accounts processed for <code>{html.escape(target)}</code></i></p><hr/>"
+            "<table bordered striped>"
+            "<tr><th>RESULT</th><th>COUNT</th></tr>"
+            f"<tr><td>🟢 Leaved</td><td><b>{leave_result['leaved']}</b></td></tr>"
+            f"<tr><td>🟡 No Member</td><td><b>{leave_result['no_member']}</b></td></tr>"
+            f"<tr><td>🔴 Failed</td><td><b>{leave_result['failed']}</b></td></tr>"
+            f"<tr><td>📦 Total Accounts</td><td><b>{total}</b></td></tr>"
+            "</table>"
+            "<footer>Leave operation finished.</footer>"
+        )
+        fallback_done = (
+            "╔══════════════════╗\n"
+            "║   🚪 LEAVE DONE   ║\n"
+            "╚══════════════════╝\n\n"
+            f"🎯 Target     : <code>{html.escape(target)}</code>\n"
+            f"🟢 Leaved     : <code>{leave_result['leaved']}</code>\n"
+            f"🟡 No Member  : <code>{leave_result['no_member']}</code>\n"
+            f"🔴 Failed     : <code>{leave_result['failed']}</code>\n"
+            f"📦 Total      : <code>{total}</code>"
+        )
+        await _rich_edit_by_id(
+            ctx, chat_id, msg_id,
+            rich_done, main_menu_kb(),
+            fallback_done, main_menu_kb()
+        )
 
 
 # ── /sudo /removesudo /sudoinfo ──────────────────────────────────────────────
@@ -1320,6 +1620,121 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if data.startswith("join_view:") or data == "join_summary":
+        message = q.message
+        if not message:
+            await q.answer("This message is no longer available.", show_alert=True)
+            return
+        cache_key = f"join:{message.chat_id}:{message.message_id}"
+        cached = ctx.application.bot_data.get(cache_key)
+        if not cached or cached.get("owner_id") != uid:
+            await q.answer("Join details expired. Run /join again.", show_alert=True)
+            return
+        if data == "join_summary":
+            try:
+                await edit_join_summary(ctx, message.chat_id, message.message_id,
+                                        cached["counts"], cached["total"], cached["target"])
+            except Exception as exc:
+                logging.warning("Could not restore join summary: %s", exc)
+                await q.answer("Could not restore summary.", show_alert=True)
+            return
+        category = data.split(":", 1)[1]
+        titles = {
+            "joined":  "✅ JOINED ACCOUNTS",
+            "already": "🔄 ALREADY MEMBER",
+            "failed":  "❌ FAILED ACCOUNTS",
+            "total":   "👥 ALL ACCOUNTS",
+        }
+        if category not in titles:
+            return
+        ids = cached.get("total_list" if category == "total" else category, [])
+        body = "".join(
+            f"<p><b>{i}. <code>{html.escape(str(p))}</code></b></p>"
+            for i, p in enumerate(ids, 1)
+        ) if ids else "<p>No accounts in this category.</p>"
+        await send_rich_message(
+            update, ctx, f"<h1>{titles[category]}</h1><hr/>{body}",
+            InlineKeyboardMarkup([[btn("🔙 Back", "join_summary")]]), edit=True
+        )
+        return
+
+    if data.startswith("report_view:") or data == "report_summary":
+        message = q.message
+        if not message:
+            await q.answer("This message is no longer available.", show_alert=True)
+            return
+        cache_key = f"report:{message.chat_id}:{message.message_id}"
+        cached = ctx.application.bot_data.get(cache_key)
+        if not cached or cached.get("owner_id") != uid:
+            await q.answer("Report details expired. Run report again.", show_alert=True)
+            return
+        if data == "report_summary":
+            try:
+                await edit_report_summary(ctx, message.chat_id, message.message_id,
+                                          cached["counts"], cached["target"],
+                                          cached["total_ids"], cached["count"])
+            except Exception as exc:
+                logging.warning("Could not restore report summary: %s", exc)
+                await q.answer("Could not restore summary.", show_alert=True)
+            return
+        category = data.split(":", 1)[1]
+        titles = {
+            "success": "✅ SUCCESS ACCOUNTS",
+            "failed":  "❌ FAILED ACCOUNTS",
+            "expired": "🔴 EXPIRED ACCOUNTS",
+            "total":   "👥 ALL SESSION ACCOUNTS",
+        }
+        if category not in titles:
+            return
+        ids = cached.get("total_list" if category == "total" else category, [])
+        body = "".join(
+            f"<p><b>{i}. <code>{html.escape(str(p))}</code></b></p>"
+            for i, p in enumerate(ids, 1)
+        ) if ids else "<p>No accounts in this category.</p>"
+        await send_rich_message(
+            update, ctx, f"<h1>{titles[category]}</h1><hr/>{body}",
+            InlineKeyboardMarkup([[btn("🔙 Back", "report_summary")]]), edit=True
+        )
+        return
+
+    if data.startswith("leave_view:") or data == "leave_summary":
+        message = q.message
+        if not message:
+            await q.answer("This message is no longer available.", show_alert=True)
+            return
+        cache_key = f"leave:{message.chat_id}:{message.message_id}"
+        cached = ctx.application.bot_data.get(cache_key)
+        if not cached or cached.get("owner_id") != uid:
+            await q.answer("Leave details expired. Run /leave again.", show_alert=True)
+            return
+        if data == "leave_summary":
+            try:
+                await edit_leave_summary(ctx, message.chat_id, message.message_id,
+                                         cached["counts"], cached["total"], cached["target"])
+            except Exception as exc:
+                logging.warning("Could not restore leave summary: %s", exc)
+                await q.answer("Could not restore summary.", show_alert=True)
+            return
+        category = data.split(":", 1)[1]
+        titles = {
+            "leaved":    "🟢 LEAVED ACCOUNTS",
+            "no_member": "🟡 NOT MEMBER ACCOUNTS",
+            "failed":    "🔴 FAILED ACCOUNTS",
+            "total":     "📦 ALL ACCOUNTS",
+        }
+        if category not in titles:
+            return
+        ids = cached.get("total_list" if category == "total" else category, [])
+        body = "".join(
+            f"<p><b>{i}. <code>{html.escape(str(p))}</code></b></p>"
+            for i, p in enumerate(ids, 1)
+        ) if ids else "<p>No accounts in this category.</p>"
+        await send_rich_message(
+            update, ctx, f"<h1>{titles[category]}</h1><hr/>{body}",
+            InlineKeyboardMarkup([[btn("🔙 Back", "leave_summary")]]), edit=True
+        )
+        return
+
     if data == "expired_ids":
         records = await get_expired_sessions()
         if not records:
@@ -1531,50 +1946,68 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             sessions, target, reason, count, report_message, progress_cb=cb
         )
 
-        rich_done = (
-            "<h1>📊 REPORT COMPLETE</h1>"
-            "<p><i>Mass report operation finished</i></p><hr/>"
-            "<table bordered striped>"
-            "<tr><th>RESULT</th><th>COUNT</th></tr>"
-            f"<tr><td>🎯 Target</td><td><code>{html.escape(target)}</code></td></tr>"
-            f"<tr><td>✅ Success</td><td><b>{result['success']}</b></td></tr>"
-            f"<tr><td>❌ Failed</td><td><b>{result['failed']}</b></td></tr>"
-            f"<tr><td>🔴 Expired</td><td><b>{result['expired']}</b></td></tr>"
-            f"<tr><td>👥 Total IDs</td><td><b>{total_ids}</b></td></tr>"
-            f"<tr><td>📊 Total Reports</td><td><b>{total_ids * count}</b></td></tr>"
-            "</table>"
-        )
-        if result.get("errors"):
-            unique = list(set(result["errors"]))[:5]
-            rich_done += (
-                "<h3>⚠️ ERRORS</h3>"
-                + "".join(f"<p><code>{html.escape(e)}</code></p>" for e in unique)
-            )
-        rich_done += "<footer>Report session complete.</footer>"
+        # Store result data for ᴠɪᴇᴡ button navigation
+        all_phones = [s.get("phone", "?") for s in sessions]
+        ctx.application.bot_data[f"report:{report_chat_id}:{sent_msg_id}"] = {
+            "owner_id":    uid,
+            "target":      target,
+            "count":       count,
+            "total_ids":   total_ids,
+            "counts":      {k: result[k] for k in ("success", "failed", "expired")},
+            "success":     result.get("success_ids", []),
+            "failed":      result.get("failed_ids_arr", []),
+            "expired":     result.get("expired_ids_arr", []),
+            "total_list":  all_phones,
+        }
 
-        err_line = ""
-        if result.get("errors"):
-            unique   = list(set(result["errors"]))[:5]
-            err_line = "\n\n⚠️ <b>Errors:</b>\n" + "\n".join(
-                f"• <code>{html.escape(e)}</code>" for e in unique
+        try:
+            await edit_report_summary(ctx, report_chat_id, sent_msg_id,
+                                      result, target, total_ids, count)
+        except Exception as exc:
+            logging.debug("Rich report summary blocks unavailable; using HTML fallback: %s", exc)
+            rich_done = (
+                "<h1>📊 REPORT COMPLETE</h1>"
+                "<p><i>Mass report operation finished</i></p><hr/>"
+                "<table bordered striped>"
+                "<tr><th>RESULT</th><th>COUNT</th></tr>"
+                f"<tr><td>🎯 Target</td><td><code>{html.escape(target)}</code></td></tr>"
+                f"<tr><td>✅ Success</td><td><b>{result['success']}</b></td></tr>"
+                f"<tr><td>❌ Failed</td><td><b>{result['failed']}</b></td></tr>"
+                f"<tr><td>🔴 Expired</td><td><b>{result['expired']}</b></td></tr>"
+                f"<tr><td>👥 Total IDs</td><td><b>{total_ids}</b></td></tr>"
+                f"<tr><td>📊 Total Reports</td><td><b>{total_ids * count}</b></td></tr>"
+                "</table>"
             )
-        fallback_done = (
-            "╔══════════════════╗\n"
-            "║   📊 REPORT DONE  ║\n"
-            "╚══════════════════╝\n\n"
-            f"🎯 Target   : <code>{html.escape(target)}</code>\n"
-            f"✅ Success  : <code>{result['success']}</code>\n"
-            f"❌ Failed   : <code>{result['failed']}</code>\n"
-            f"🔴 Expired  : <code>{result['expired']}</code>\n"
-            f"👥 Total IDs: <code>{total_ids}</code>\n"
-            f"📊 Total    : <code>{total_ids * count}</code>"
-            f"{err_line}"
-        )
-        await _rich_edit_by_id(
-            ctx, report_chat_id, sent_msg_id,
-            rich_done, main_menu_kb(),
-            fallback_done, main_menu_kb()
-        )
+            if result.get("errors"):
+                unique = list(set(result["errors"]))[:5]
+                rich_done += (
+                    "<h3>⚠️ ERRORS</h3>"
+                    + "".join(f"<p><code>{html.escape(e)}</code></p>" for e in unique)
+                )
+            rich_done += "<footer>Report session complete.</footer>"
+            err_line = ""
+            if result.get("errors"):
+                unique   = list(set(result["errors"]))[:5]
+                err_line = "\n\n⚠️ <b>Errors:</b>\n" + "\n".join(
+                    f"• <code>{html.escape(e)}</code>" for e in unique
+                )
+            fallback_done = (
+                "╔══════════════════╗\n"
+                "║   📊 REPORT DONE  ║\n"
+                "╚══════════════════╝\n\n"
+                f"🎯 Target   : <code>{html.escape(target)}</code>\n"
+                f"✅ Success  : <code>{result['success']}</code>\n"
+                f"❌ Failed   : <code>{result['failed']}</code>\n"
+                f"🔴 Expired  : <code>{result['expired']}</code>\n"
+                f"👥 Total IDs: <code>{total_ids}</code>\n"
+                f"📊 Total    : <code>{total_ids * count}</code>"
+                f"{err_line}"
+            )
+            await _rich_edit_by_id(
+                ctx, report_chat_id, sent_msg_id,
+                rich_done, main_menu_kb(),
+                fallback_done, main_menu_kb()
+            )
         tmp.pop(uid, None)
         return ConversationHandler.END
 
@@ -1831,6 +2264,7 @@ def main():
     app.add_handler(CommandHandler("unhost",     unhost_cmd))
     app.add_handler(CommandHandler("help",       help_cmd))
     app.add_handler(CommandHandler("join",       join_cmd))
+    app.add_handler(CommandHandler("leave",      leave_cmd))
     app.add_handler(CommandHandler("sudo",       sudo_cmd))
     app.add_handler(CommandHandler("removesudo", removesudo_cmd))
     app.add_handler(CommandHandler("sudoinfo",   sudoinfo_cmd))
@@ -1850,6 +2284,7 @@ def main():
             BotCommand("session",    "List your sessions"),
             BotCommand("unhost",     "Remove a session by phone"),
             BotCommand("join",       "Join with all accounts"),
+            BotCommand("leave",      "Leave a chat with all accounts"),
             BotCommand("sudoinfo",   "Access directory"),
             BotCommand("cancel",     "Cancel current flow"),
             BotCommand("help",       "All commands"),
