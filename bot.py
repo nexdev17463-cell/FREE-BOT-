@@ -215,7 +215,7 @@ def status_view_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [btn("🟢 Active View", "status_view:active"), btn("🔴 Expired View", "status_view:expired")],
         [btn("📦 Total View", "status_view:total")],
-        [btn_with_visible_emoji("🔄 Refresh", "refresh_status"), btn("🔙 Back", "back")],
+        [btn("🔄 Refresh", "refresh_status"), btn("🔙 Back", "back")],
     ])
 
 
@@ -783,7 +783,7 @@ def build_refresh_summary_blocks(result: dict):
     ]]
     for label, count, style, callback in rows:
         cells.append([
-            {"text": label},
+            {"text": rich_text_with_custom_emojis(label)},
             {"text": str(count), "align": "center"},
             {"text": [{"type": "button", "button": {
                 "text": "ᴠɪᴇᴡ", "style": style, "callback_data": callback
