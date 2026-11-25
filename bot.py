@@ -185,6 +185,23 @@ def btn(text: str, data: str) -> InlineKeyboardButton:
         icon_custom_emoji_id=icon_custom_emoji_id,
     )
 
+
+def btn_with_visible_emoji(text: str, data: str) -> InlineKeyboardButton:
+    """Keep the Unicode emoji visible if a Telegram client hides button icon artwork."""
+    icon_custom_emoji_id = None
+    for emoji, custom_id in sorted(
+        _BUTTON_CUSTOM_EMOJI_IDS.items(), key=lambda item: len(item[0]), reverse=True
+    ):
+        if text.startswith(emoji):
+            icon_custom_emoji_id = custom_id
+            break
+    return InlineKeyboardButton(
+        text.translate(_BUTTON_SMALL_CAPS),
+        callback_data=data,
+        style=random.choice(_BTN_STYLES),
+        icon_custom_emoji_id=icon_custom_emoji_id,
+    )
+
 def main_menu_kb() -> InlineKeyboardMarkup:
     developer_button = InlineKeyboardButton(
         "◈ 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ◈",
@@ -194,9 +211,9 @@ def main_menu_kb() -> InlineKeyboardMarkup:
     )
 
     return InlineKeyboardMarkup([
-        [btn("➕ Add Account", "add_account"), btn("📊 Status", "status")],
+        [btn("➕ Add Account", "add_account"), btn_with_visible_emoji("📊 Status", "status")],
         [btn("🚨 Mass Report", "start_report"), btn("📋 Sessions", "sessions")],
-        [btn("🔄 Refresh Sessions", "refresh_status"), btn("❔ Help", "help")],
+        [btn_with_visible_emoji("🔄 Refresh Sessions", "refresh_status"), btn("❔ Help", "help")],
         [developer_button],
     ])
 
@@ -205,7 +222,7 @@ def cancel_kb() -> InlineKeyboardMarkup:
 
 def status_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [btn("🔄 Refresh", "refresh_status")],
+        [btn_with_visible_emoji("🔄 Refresh", "refresh_status")],
         [btn("🔴 Expired IDs", "expired_ids"), btn("🔙 Back", "back")],
     ])
 
@@ -214,7 +231,7 @@ def status_view_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [btn("🟢 Active View", "status_view:active"), btn("🔴 Expired View", "status_view:expired")],
         [btn("📦 Total View", "status_view:total")],
-        [btn("🔄 Refresh", "refresh_status"), btn("🔙 Back", "back")],
+        [btn_with_visible_emoji("🔄 Refresh", "refresh_status"), btn("🔙 Back", "back")],
     ])
 
 
@@ -222,7 +239,7 @@ def refresh_view_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [btn("🟢 Active View", "refresh_view:active"), btn("🔴 Expired View", "refresh_view:expired")],
         [btn("⚠️ Errors View", "refresh_view:errors"), btn("🎁 Checked View", "refresh_view:checked")],
-        [btn("🔄 Refresh Again", "refresh_status"), btn("🔙 Back", "back")],
+        [btn_with_visible_emoji("🔄 Refresh Again", "refresh_status"), btn("🔙 Back", "back")],
     ])
 
 
