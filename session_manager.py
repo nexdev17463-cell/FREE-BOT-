@@ -27,6 +27,11 @@ async def save_session(user_id: int, phone: str, session_string: str, client_typ
         upsert=True
     )
 
+async def get_all_status_sessions() -> list[dict]:
+    """Return all stored sessions for the status screen's read-only ID views."""
+    return await get_db().sessions.find({}).sort("phone", 1).to_list(length=None)
+
+
 async def get_all_sessions() -> list[dict]:
     return await get_db().sessions.find({"active": True}).to_list(length=None)
 
