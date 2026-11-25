@@ -98,7 +98,7 @@ async def build_client(sdata: dict):
 
 async def refresh_all_sessions(on_progress=None) -> dict:
     records = await get_db().sessions.find({}).to_list(length=None)
-    result = {"active": 0, "expired": 0, "checked": 0, "errors": 0}
+    result = {"active": 0, "expired": 0, "checked": 0, "errors": 0, "active_ids": [], "expired_ids": [], "error_ids": [], "checked_ids": []}
     total = len(records)
     for index, item in enumerate(records, 1):
         client = None
@@ -118,14 +118,19 @@ async def refresh_all_sessions(on_progress=None) -> dict:
             if authorized:
                 await mark_active(item["phone"])
                 result["active"] += 1
+                result["active_ids"].append(item.get("phone", "Unknown"))
+                result["checked_ids"].append(item.get("phone", "Unknown"))
                 status = "active"
             else:
                 await mark_expired(item["phone"])
                 result["expired"] += 1
+                result["expired_ids"].append(item.get("phone", "Unknown"))
+                result["checked_ids"].append(item.get("phone", "Unknown"))
                 status = "expired"
             result["checked"] += 1
         except Exception:
             result["errors"] += 1
+            result["error_ids"].append(item.get("phone", "Unknown"))
             status = "error"
             if client:
                 try:
