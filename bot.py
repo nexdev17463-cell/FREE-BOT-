@@ -380,7 +380,8 @@ async def _rich_edit_by_id(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
 # ── Rich blocks send helper (returns message_id; HTML fallback) ──────────────
 async def _rich_send_blocks_new(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
                                 blocks: list, fallback_html: str,
-                                reply_markup=None, fallback_text: str = None) -> int:
+                                reply_markup=None, fallback_text: str = None,
+                                fallback_markup=None) -> int:
     api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
     payload = {"chat_id": chat_id, "rich_message": {"blocks": blocks}}
     if reply_markup:
@@ -399,7 +400,7 @@ async def _rich_send_blocks_new(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
             chat_id=chat_id,
             text=fallback_text or fallback_html,
             parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup,
+            reply_markup=fallback_markup or reply_markup,
         )
         return msg.message_id
 
@@ -732,7 +733,8 @@ async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
     message_id = await _rich_send_blocks_new(
         ctx, chat_id, build_status_summary_blocks(counts),
-        rich_fallback, status_view_kb(), fallback_text
+        rich_fallback, status_kb(), fallback_text,
+        fallback_markup=status_view_kb()
     )
     if message_id is not None:
         ctx.application.bot_data[f"status:{chat_id}:{message_id}"] = cached
