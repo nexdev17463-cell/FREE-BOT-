@@ -3,10 +3,11 @@ import re
 import logging
 from telethon.tl.functions.account import ReportPeerRequest
 from telethon.tl.functions.messages import ReportRequest
-from telethon.tl.functions.channels import JoinChannelRequest
+from telethon.tl.functions.channels import JoinChannelRequest, LeaveChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest as TelethonImportInvite
 from telethon.errors import (
     UserAlreadyParticipantError as TelethonAlreadyParticipant,
+    UserNotParticipantError as TelethonNotParticipant,
     FloodWaitError, UserDeactivatedError,
     AuthKeyUnregisteredError, SessionRevokedError,
 )
@@ -233,6 +234,8 @@ async def mass_report(
         "success": 0, "failed": 0, "expired": 0,
         "total_expected": len(sessions) * count_per_id,
         "errors": [],
+        # ID tracking (additive — existing callers unaffected)
+        "success_ids": [], "failed_ids_arr": [], "expired_ids_arr": [],
     }
 
     async def worker(sdata: dict):
@@ -252,15 +255,18 @@ async def mass_report(
             if not authorized:
                 await mark_expired(phone)
                 results["expired"] += 1
+                results["expired_ids_arr"].append(phone)
                 if progress_cb:
                     await progress_cb(results)
                 return
 
+            phone_success = False
             for _ in range(count_per_id):
                 try:
                     ok, err = await report_once(client, target, reason_key, report_message)
                     if ok:
                         results["success"] += 1
+                        phone_success = True
                     else:
                         results["failed"] += 1
                         if err and err not in results["errors"]:
@@ -268,16 +274,25 @@ async def mass_report(
                 except ConnectionError:
                     await mark_expired(phone)
                     results["expired"] += 1
+                    results["expired_ids_arr"].append(phone)
                     break
                 finally:
                     if progress_cb:
                         await progress_cb(results)
                 await asyncio.sleep(1)
 
+            if phone_success:
+                if phone not in results["success_ids"]:
+                    results["success_ids"].append(phone)
+            else:
+                if phone not in results["failed_ids_arr"] and phone not in results["expired_ids_arr"]:
+                    results["failed_ids_arr"].append(phone)
+
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
             logger.error(f"worker failed [{phone}]: {err}")
             results["failed"] += count_per_id
+            results["failed_ids_arr"].append(phone)
             if err not in results["errors"]:
                 results["errors"].append(err)
             if progress_cb:
@@ -302,7 +317,11 @@ async def mass_join(sessions: list[dict], target: str, progress_cb=None) -> dict
     from pyrogram import Client as PyroClient
     from pyrogram.errors import UserAlreadyParticipant as PyroAlreadyParticipant
 
-    results = {"joined": 0, "already": 0, "failed": 0}
+    results = {
+        "joined": 0, "already": 0, "failed": 0,
+        # ID tracking (additive — existing callers unaffected)
+        "joined_ids": [], "already_ids": [], "failed_ids_arr": [],
+    }
 
     async def worker(sdata: dict):
         phone = sdata["phone"]
@@ -320,6 +339,7 @@ async def mass_join(sessions: list[dict], target: str, progress_cb=None) -> dict
             if not authorized:
                 await mark_expired(phone)
                 results["failed"] += 1
+                results["failed_ids_arr"].append(phone)
                 if progress_cb:
                     await progress_cb(results)
                 return
@@ -336,20 +356,138 @@ async def mass_join(sessions: list[dict], target: str, progress_cb=None) -> dict
                     else:
                         await client(JoinChannelRequest(target))
                 results["joined"] += 1
+                results["joined_ids"].append(phone)
 
             except (TelethonAlreadyParticipant, PyroAlreadyParticipant):
                 results["already"] += 1
+                results["already_ids"].append(phone)
             except Exception as e:
                 err = str(e).lower()
                 if "already" in err or "participant" in err:
                     results["already"] += 1
+                    results["already_ids"].append(phone)
                 else:
                     results["failed"] += 1
+                    results["failed_ids_arr"].append(phone)
                     logger.warning(f"join [{phone}]: {e}")
 
         except Exception as e:
             results["failed"] += 1
+            results["failed_ids_arr"].append(phone)
             logger.warning(f"worker [{phone}]: {e}")
+        finally:
+            if client:
+                try:
+                    if is_pyro:
+                        await client.stop()
+                    else:
+                        await client.disconnect()
+                except Exception:
+                    pass
+        if progress_cb:
+            await progress_cb(results)
+
+    await asyncio.gather(*[worker(s) for s in sessions])
+    return results
+
+
+# ── mass_leave ───────────────────────────────────────────────────────────────
+async def mass_leave(sessions: list[dict], target: str, progress_cb=None) -> dict:
+    """Leave a group/channel with all provided sessions.
+
+    Returns:
+        leaved       — number of sessions that successfully left
+        no_member    — number of sessions that were not members
+        failed       — number of sessions that failed for other reasons
+        leaved_ids   — phone numbers that left
+        no_member_ids— phone numbers that were not members
+        failed_ids   — phone numbers that failed
+    """
+    from session_manager import build_client
+    from pyrogram import Client as PyroClient
+    from pyrogram.errors import (
+        UserNotParticipant as PyroNotParticipant,
+        AuthKeyUnregistered as PyroAuthKeyUnregistered,
+        UserDeactivated as PyroUserDeactivated,
+        SessionRevoked as PyroSessionRevoked,
+    )
+
+    results = {
+        "leaved": 0, "no_member": 0, "failed": 0,
+        "leaved_ids": [], "no_member_ids": [], "failed_ids": [],
+    }
+
+    async def worker(sdata: dict):
+        phone = sdata["phone"]
+        client = None
+        is_pyro = sdata.get("client_type", "telethon") == "pyrogram"
+        try:
+            client = await build_client(sdata)
+            if is_pyro:
+                await client.start()
+                me = await client.get_me()
+                authorized = me is not None
+            else:
+                await client.connect()
+                authorized = await client.is_user_authorized()
+
+            if not authorized:
+                await mark_expired(phone)
+                results["failed"] += 1
+                results["failed_ids"].append(phone)
+                if progress_cb:
+                    await progress_cb(results)
+                return
+
+            try:
+                if is_pyro:
+                    # Pyrogram: resolve and leave
+                    if is_invite_link(target):
+                        # Can't leave via invite link; resolve by hash
+                        try:
+                            chat = await client.get_chat(extract_invite_hash(target))
+                            await client.leave_chat(chat.id)
+                        except Exception as e:
+                            err_low = str(e).lower()
+                            if "not" in err_low and ("member" in err_low or "participant" in err_low):
+                                raise PyroNotParticipant
+                            raise
+                    else:
+                        await client.leave_chat(target)
+                    results["leaved"] += 1
+                    results["leaved_ids"].append(phone)
+                else:
+                    # Telethon
+                    entity = await _telethon_get_entity(client, target)
+                    await client(LeaveChannelRequest(entity))
+                    results["leaved"] += 1
+                    results["leaved_ids"].append(phone)
+
+            except (TelethonNotParticipant, PyroNotParticipant):
+                results["no_member"] += 1
+                results["no_member_ids"].append(phone)
+            except (PyroAuthKeyUnregistered, PyroUserDeactivated, PyroSessionRevoked):
+                await mark_expired(phone)
+                results["failed"] += 1
+                results["failed_ids"].append(phone)
+            except SESSION_ERRORS:
+                await mark_expired(phone)
+                results["failed"] += 1
+                results["failed_ids"].append(phone)
+            except Exception as e:
+                err = str(e).lower()
+                if "not" in err and ("member" in err or "participant" in err):
+                    results["no_member"] += 1
+                    results["no_member_ids"].append(phone)
+                else:
+                    results["failed"] += 1
+                    results["failed_ids"].append(phone)
+                    logger.warning(f"leave [{phone}]: {e}")
+
+        except Exception as e:
+            results["failed"] += 1
+            results["failed_ids"].append(phone)
+            logger.warning(f"leave worker [{phone}]: {e}")
         finally:
             if client:
                 try:
