@@ -829,17 +829,16 @@ def build_join_summary_blocks(join_result: dict, total: int, target: str) -> lis
     ]
     cells = [[
         {"text": "RESULT", "is_header": True},
-        {"text": "COUNT",  "is_header": True, "align": "center"},
+        {"text": "COUNT", "is_header": True, "align": "center"},
+        {"text": "DETAILS", "is_header": True, "align": "center"},
     ]]
     for label, count, style, cb_data in rows:
         cells.append([
             {"text": label},
-            {"text": [
-                {"type": "bold", "text": str(count)},
-                {"type": "button", "button": {
-                    "text": "ᴠɪᴇᴡ", "style": style, "callback_data": cb_data,
-                }},
-            ], "align": "center"},
+            {"text": [{"type": "bold", "text": str(count)}], "align": "center"},
+            {"text": [{"type": "button", "button": {
+                "text": "ᴠɪᴇᴡ", "style": style, "callback_data": cb_data,
+            }}], "align": "center"},
         ])
     return [
         {"type": "heading", "size": 1, "text": "✅ JOIN COMPLETE"},
@@ -932,17 +931,16 @@ def build_leave_summary_blocks(leave_result: dict, total: int, target: str) -> l
     ]
     cells = [[
         {"text": "RESULT", "is_header": True},
-        {"text": "COUNT",  "is_header": True, "align": "center"},
+        {"text": "COUNT", "is_header": True, "align": "center"},
+        {"text": "DETAILS", "is_header": True, "align": "center"},
     ]]
     for label, count, style, cb_data in rows:
         cells.append([
             {"text": label},
-            {"text": [
-                {"type": "bold", "text": str(count)},
-                {"type": "button", "button": {
-                    "text": "ᴠɪᴇᴡ", "style": style, "callback_data": cb_data,
-                }},
-            ], "align": "center"},
+            {"text": [{"type": "bold", "text": str(count)}], "align": "center"},
+            {"text": [{"type": "button", "button": {
+                "text": "ᴠɪᴇᴡ", "style": style, "callback_data": cb_data,
+            }}], "align": "center"},
         ])
     return [
         {"type": "heading",  "size": 1, "text": "🚪 LEAVE COMPLETE"},
