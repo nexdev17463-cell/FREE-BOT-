@@ -1174,7 +1174,7 @@ async def remove_expired_id_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     phone = ctx.args[0].strip()
-    if not re.fullmatch(r"\\+[1-9]\\d{7,14}", phone):
+    if not re.fullmatch(r"\+[1-9]\d{7,14}", phone):
         await send_rich_message(
             update, ctx,
             "<h2>❌ INVALID PHONE NUMBER</h2>"
