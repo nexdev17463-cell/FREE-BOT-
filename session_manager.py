@@ -2,6 +2,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from config import API_ID, API_HASH, MONGO_URI
+from session_locks import get_session_lock
 from datetime import datetime, timezone
 
 _db = None
@@ -122,6 +123,8 @@ async def refresh_all_sessions(on_progress=None) -> dict:
     result = {"active": 0, "expired": 0, "checked": 0, "errors": 0, "active_ids": [], "expired_ids": [], "error_ids": [], "checked_ids": []}
     total = len(records)
     for index, item in enumerate(records, 1):
+        session_lock = get_session_lock(item.get("phone", ""))
+        await session_lock.acquire()
         client = None
         status = "error"
         try:
@@ -169,4 +172,5 @@ async def refresh_all_sessions(on_progress=None) -> dict:
                 except Exception:
                     # UI reporting must never interrupt the actual session refresh.
                     pass
+            session_lock.release()
     return result
