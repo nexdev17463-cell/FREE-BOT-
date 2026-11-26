@@ -498,7 +498,6 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard,
         )
 
-
 # ── /help ────────────────────────────────────────────────────────────────────
 async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -997,8 +996,7 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "<table bordered striped>"
             "<tr><th>STATUS</th><th>ACCOUNT</th><th>RESULT</th></tr>"
             f"{rows}"
-            "</table>"
-            "<footer>🔐 Account numbers are masked for privacy</footer>"
+            "</table>"            "<footer>🔐 Account numbers are masked for privacy</footer>"
         )
 
     async def publish_progress(html_content: str, fallback_text: str = "", initial: bool = False):
@@ -1497,8 +1495,7 @@ async def leave_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "<h1>🚪 LEAVE COMPLETE</h1>"
             f"<p><i>All accounts processed for <code>{html.escape(target)}</code></i></p><hr/>"
             "<table bordered striped>"
-            "<tr><th>RESULT</th><th>COUNT</th></tr>"
-            f"<tr><td>🟢 Leaved</td><td><b>{leave_result['leaved']}</b></td></tr>"
+            "<tr><th>RESULT</th><th>COUNT</th></tr>"            f"<tr><td>🟢 Leaved</td><td><b>{leave_result['leaved']}</b></td></tr>"
             f"<tr><td>🟡 No Member</td><td><b>{leave_result['no_member']}</b></td></tr>"
             f"<tr><td>🔴 Failed</td><td><b>{leave_result['failed']}</b></td></tr>"
             f"<tr><td>📦 Total Accounts</td><td><b>{total}</b></td></tr>"
@@ -1997,8 +1994,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         rich = (
             "<h1>📋 ALL SESSIONS</h1><p><i>Saved account overview</i></p><hr/>"
-            + ("<table bordered striped><tr><th>#</th><th>PHONE</th></tr>" + rows + "</table>"
-               if rows else "<p>No saved sessions were found.</p>")
+            + ("<table bordered striped><tr><th>#</th><th>PHONE</th></tr>" + rows + "</table>"               if rows else "<p>No saved sessions were found.</p>")
         )
         await send_rich_message(
             update, ctx, rich,
@@ -2234,64 +2230,295 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return None
 
 
-# ── Account add flow (Pyrogram + Official Android credentials) ───────────────
+# ── Account add flow (Pyrogram; configured Telegram API credentials) ──────────
 async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid   = update.effective_user.id
-    phone = update.message.text.strip()
-
+    uid = update.effective_user.id
+    phone = (update.message.text or "").strip()
     if not re.fullmatch(r"\+[1-9]\d{7,14}", phone):
-        await send_rich_message(
-            update, ctx,
-            "<h2>❌ INVALID FORMAT</h2>"
-            "<p>Use international format: <code>+919876543210</code></p>"
-            "<footer>Include the country code with + prefix.</footer>",
-            cancel_kb()
-        )
+        await send_rich_message(update, ctx,
+            "<h2>❌ INVALID PHONE NUMBER</h2>"
+            "<p>Use international format, for example <code>+919876543210</code>.</p>"
+            "<footer>Include + and the country calling code.</footer>", cancel_kb())
         return ADD_PHONE
 
     try:
         existing_sessions = await get_all_sessions()
     except Exception:
-        logging.exception("Could not check whether phone is already hosted")
-        await send_rich_message(
-            update, ctx,
+        logging.exception("Could not check existing hosted sessions")
+        await send_rich_message(update, ctx,
             "<h2>❌ DATABASE CHECK FAILED</h2>"
-            "<p>Could not verify whether this account is already hosted.</p>"
-            "<footer>Please try again later. No OTP was requested.</footer>",
-            cancel_kb()
-        )
+            "<p>Could not verify existing sessions, so no login code was requested.</p>"
+            "<footer>Please try again later.</footer>", cancel_kb())
         return ADD_PHONE
 
     if any(str(item.get("phone", "")).strip() == phone for item in existing_sessions):
-        await send_rich_message(
-            update, ctx,
+        await send_rich_message(update, ctx,
             "<h2>⚠️ ACCOUNT ALREADY HOSTED</h2>"
-            f"<p><code>{html.escape(phone)}</code> is already hosted in this bot.</p>"
-            "<footer>No OTP was sent and the existing session was left unchanged.</footer>",
-            cancel_kb()
-        )
+            f"<p><code>{html.escape(phone)}</code> is already hosted.</p>"
+            "<footer>The existing session was not changed.</footer>", cancel_kb())
         return ADD_PHONE
 
+    client = None
+    connected = False
     try:
         from pyrogram import Client
-
-        OFFICIAL_API_ID   = 6
-        OFFICIAL_API_HASH = "eb06d4abfb49dc3eeb1aeb98ae0f581e"
-
+        if not API_ID or not API_HASH:
+            raise RuntimeError("API_ID/API_HASH are missing from repository secrets")
         client = Client(
-            name="host_" + str(uid),
-            api_id=OFFICIAL_API_ID,
-            api_hash=OFFICIAL_API_HASH,
-            in_memory=True,
-            device_model="Samsung Galaxy S24",
-            system_version="Android 14",
-            app_version="11.4.0",
-            lang_code="en",
-            no_updates=False,
+            name=f"host_{uid}", api_id=API_ID, api_hash=API_HASH,
+            in_memory=True, device_model="Android", system_version="Android",
+            app_version="1.0", lang_code="en", no_updates=True,
         )
         await client.connect()
+        connected = True
         sent_code = await client.send_code(phone)
+        if not getattr(sent_code, "phone_code_hash", None):
+            raise RuntimeError("Telegram did not return a phone_code_hash")
         tmp[uid] = {
-            "client":          client,
-            "phone":           phone,
-            "phone_code_hash": sent_cod
+            "client": client, "phone": phone,
+            "phone_code_hash": sent_code.phone_code_hash,
+            "client_type": "pyrogram",
+        }
+        await send_rich_message(update, ctx,
+            "<h2>📩 LOGIN CODE REQUESTED</h2>"
+            "<p>Telegram accepted the login-code request.</p>"
+            "<p>Check the Telegram app on your logged-in devices first. Telegram decides whether the code is delivered in-app, by SMS, or through another supported route.</p>"
+            "<footer>Never share this code with anyone. Enter it here only to complete your own account login.</footer>",
+            cancel_kb())
+        return ADD_CODE
+    except Exception as exc:
+        logging.exception("Telegram login-code request failed for user %s", uid)
+        tmp.pop(uid, None)
+        if client is not None and connected:
+            try:
+                await client.disconnect()
+            except Exception:
+                logging.exception("Failed to disconnect temporary login client")
+        detail = html.escape(str(exc))[:500]
+        await send_rich_message(update, ctx,
+            "<h2>❌ TELEGRAM LOGIN REQUEST FAILED</h2>"
+            f"<p><code>{detail}</code></p>"
+            "<footer>Check API_ID/API_HASH, phone format, Telegram rate limits, and the Telegram app's active sessions. Code delivery is controlled by Telegram.</footer>",
+            cancel_kb())
+        return ADD_PHONE
+
+
+async def recv_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    code = (update.message.text or "").strip()
+    data = tmp.get(uid)
+    if not data or not data.get("client"):
+        await send_rich_message(update, ctx, "<h2>⌛ LOGIN SESSION EXPIRED</h2><p>Start again with /host.</p>")
+        return ConversationHandler.END
+    client = data["client"]
+    try:
+        await client.sign_in(phone_number=data["phone"], phone_code_hash=data["phone_code_hash"], phone_code=code)
+    except Exception as exc:
+        if "SessionPasswordNeeded" in type(exc).__name__:
+            await send_rich_message(update, ctx,
+                "<h2>🔐 TWO-FACTOR AUTHENTICATION</h2>"
+                "<p>This account has 2-step verification enabled. Enter your Telegram 2FA password.</p>", cancel_kb())
+            return ADD_2FA
+        detail = html.escape(str(exc))[:500]
+        await send_rich_message(update, ctx,
+            f"<h2>❌ CODE VERIFICATION FAILED</h2><p><code>{detail}</code></p><footer>Start /host again to request a fresh code.</footer>", cancel_kb())
+        try:
+            await client.disconnect()
+        except Exception:
+            logging.exception("Failed to disconnect after code verification error")
+        tmp.pop(uid, None)
+        return ConversationHandler.END
+    try:
+        session_str = await client.export_session_string()
+        await client.disconnect()
+        await save_session(uid, data["phone"], session_str, client_type="pyrogram")
+        await send_rich_message(update, ctx,
+            "<h1>✅ ACCOUNT ADDED</h1>"
+            f"<p><code>{html.escape(data['phone'])}</code> connected successfully.</p>"
+            "<footer>Your session has been saved securely.</footer>", main_menu_kb())
+        tmp.pop(uid, None)
+    except Exception as exc:
+        logging.exception("Could not save newly authenticated Telegram session")
+        await send_rich_message(update, ctx,
+            f"<h2>❌ SESSION SAVE FAILED</h2><p><code>{html.escape(str(exc))[:500]}</code></p>")
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        tmp.pop(uid, None)
+    return ConversationHandler.END
+
+
+async def recv_2fa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    password = (update.message.text or "").strip()
+    data = tmp.get(uid)
+    if not data or not data.get("client"):
+        await send_rich_message(update, ctx, "<h2>⌛ LOGIN SESSION EXPIRED</h2><p>Start again with /host.</p>")
+        return ConversationHandler.END
+    client = data["client"]
+    try:
+        await client.check_password(password)
+        session_str = await client.export_session_string()
+        await client.disconnect()
+        await save_session(uid, data["phone"], session_str, client_type="pyrogram")
+        await send_rich_message(update, ctx,
+            "<h1>✅ ACCOUNT ADDED</h1>"
+            f"<p><code>{html.escape(data['phone'])}</code> connected successfully.</p>"
+            "<footer>Your session has been saved securely.</footer>", main_menu_kb())
+        tmp.pop(uid, None)
+    except Exception as exc:
+        logging.exception("Telegram 2FA verification/session save failed")
+        await send_rich_message(update, ctx,
+            f"<h2>❌ 2FA FAILED</h2><p><code>{html.escape(str(exc))[:500]}</code></p>")
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        tmp.pop(uid, None)
+    return ConversationHandler.END
+
+
+# ── Report flow ──────────────────────────────────────────────────────────────
+async def recv_target(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid    = update.effective_user.id
+    target = update.message.text.strip()
+    tmp[uid] = {"target": target}
+    kb = [[btn(v[0], f"cat_{k}")] for k, v in REASONS.items()]
+    await send_rich_message(
+        update, ctx,
+        "<h2>📂 SELECT REPORT CATEGORY</h2>"
+        f"<p>🎯 Target: <code>{html.escape(target)}</code></p><hr/>"
+        "<p>Select the category that best describes the content to report:</p>",
+        InlineKeyboardMarkup(kb)
+    )
+    return REPORT_REASON_CAT
+
+async def recv_report_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid  = update.effective_user.id
+    text = update.message.text.strip()
+    if not text or len(text) > 512:
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ INVALID MESSAGE</h2>"
+            "<p>Report message must be between 1 and 512 characters.</p>"
+            "<p>Please try again:</p>"
+        )
+        return REPORT_MESSAGE
+    tmp[uid]["report_message"] = text
+    await send_rich_message(
+        update, ctx,
+        "<h2>🔢 REPORTS PER ID</h2>"
+        "<p>How many reports should be sent per account?</p>"
+        "<p>Enter a number (e.g. <code>20</code>):</p>",
+        cancel_kb()
+    )
+    return REPORT_COUNT
+
+async def recv_count(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    try:
+        count = int(update.message.text.strip())
+        if count < 1:
+            raise ValueError
+    except ValueError:
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ INVALID NUMBER</h2><p>Enter a valid positive integer:</p>"
+        )
+        return REPORT_COUNT
+
+    tmp[uid]["count"] = count
+    sessions = await get_all_sessions()
+    t = tmp[uid]
+    await send_rich_message(
+        update, ctx,
+        "<h1>⚠️ CONFIRM REPORT</h1>"
+        "<p><i>Review the details before proceeding</i></p><hr/>"
+        "<table bordered striped>"
+        f"<tr><td>🎯 Target</td><td><code>{html.escape(t['target'])}</code></td></tr>"
+        f"<tr><td>📋 Reason</td><td><code>{t['reason']}</code></td></tr>"
+        f"<tr><td>✍️ Message</td><td><code>{html.escape(t['report_message'][:60])}{'...' if len(t['report_message']) > 60 else ''}</code></td></tr>"
+        f"<tr><td>🔢 Per ID</td><td><b>{count}</b></td></tr>"
+        f"<tr><td>👥 Active IDs</td><td><b>{len(sessions)}</b></td></tr>"
+        f"<tr><td>📊 Total Reports</td><td><b>{len(sessions) * count}</b></td></tr>"
+        "</table>"
+        "<footer>⚠️ This action cannot be undone once started.</footer>",
+        InlineKeyboardMarkup([
+            [btn("✅ Start Reporting", "confirm_report"),
+             btn("❌ Cancel", "back")]
+        ])
+    )
+    return CONFIRM_REPORT
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("host", host_cmd),
+            CallbackQueryHandler(button_handler, pattern="^(add_account|start_report)$"),
+        ],
+        states={
+            ADD_PHONE:         [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_phone)],
+            ADD_CODE:          [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_code)],
+            ADD_2FA:           [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_2fa)],
+            REPORT_TARGET:     [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_target)],
+            REPORT_REASON_CAT: [CallbackQueryHandler(button_handler, pattern="^cat_")],
+            REPORT_REASON_SUB: [CallbackQueryHandler(button_handler, pattern="^sub_")],
+            REPORT_MESSAGE:    [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_report_message)],
+            REPORT_COUNT:      [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_count)],
+            CONFIRM_REPORT:    [CallbackQueryHandler(button_handler, pattern="^confirm_report$")],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel_flow),
+            CallbackQueryHandler(cancel_flow, pattern="^cancel_flow$"),
+            CallbackQueryHandler(button_handler, pattern="^back$"),
+        ],
+        per_message=False,
+        allow_reentry=True,
+    )
+
+    app.add_handler(CommandHandler("start",      start))
+    app.add_handler(CommandHandler("status",     status_cmd))
+    app.add_handler(CommandHandler("refresh",    refresh_cmd))
+    app.add_handler(CommandHandler("session",    session_cmd))
+    app.add_handler(CommandHandler("unhost",     unhost_cmd))
+    app.add_handler(CommandHandler("removeexpiredid", remove_expired_id_cmd))
+    app.add_handler(CommandHandler("help",       help_cmd))
+    app.add_handler(CommandHandler("join",       join_cmd))
+    app.add_handler(CommandHandler("leave",      leave_cmd))
+    app.add_handler(CommandHandler("sudo",       sudo_cmd))
+    app.add_handler(CommandHandler("removesudo", removesudo_cmd))
+    app.add_handler(CommandHandler("sudoinfo",   sudoinfo_cmd))
+    app.add_handler(CommandHandler("otp",        otp_cmd))  # hidden
+    app.add_handler(conv)
+    app.add_handler(CommandHandler("cancel",     cancel_flow))
+    app.add_handler(CallbackQueryHandler(button_handler))
+
+    async def on_startup(app):
+        await fetch_proxies()
+        asyncio.create_task(rotate_forever())
+        await app.bot.set_my_commands([
+            BotCommand("start",      "Main menu"),
+            BotCommand("host",       "Add a Telegram account"),
+            BotCommand("status",     "Session statistics"),
+            BotCommand("refresh",    "Verify all sessions"),
+            BotCommand("session",    "List your sessions"),
+            BotCommand("unhost",     "Remove a session by phone"),
+            BotCommand("removeexpiredid", "Permanently remove an expired ID"),
+            BotCommand("join",       "Join with all accounts"),
+            BotCommand("leave",      "Leave a chat with all accounts"),
+            BotCommand("sudoinfo",   "Access directory"),
+            BotCommand("cancel",     "Cancel current flow"),
+            BotCommand("help",       "All commands"),
+        ])
+
+    app.post_init = on_startup
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
