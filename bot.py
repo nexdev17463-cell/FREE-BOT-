@@ -1171,16 +1171,15 @@ async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update, ctx):
         return
     from session_manager import get_user_sessions
+    progress_chat_id = update.effective_chat.id
     progress_id = await rich_progress_send(
-        ctx, update.effective_chat.id,
-        progress_panel("📋 SESSION OVERVIEW", "Loading your saved accounts", [
+        ctx, progress_chat_id,
+        progress_panel("📋 SESSION DIRECTORY", "Loading your saved sessions", [
+            ("Access check", "Authorized", "✅ DONE"),
             ("Database query", "Running", "⏳ RUNNING"),
-            ("Prepare session list", "Pending", "⌛ WAITING"),
-            ("Render result", "Pending", "⌛ WAITING"),
+            ("Session table", "Waiting", "⌛ WAITING"),
         ])
     )
-    progress_chat_id = update.effective_chat.id
-    progress_id = await rich_progress_send(ctx, progress_chat_id, progress_panel("📋 SESSION DIRECTORY", "Loading your saved sessions", [("Access check", "Authorized", "✅ DONE"), ("Database query", "Running", "⏳ RUNNING"), ("Session table", "Waiting", "⌛ WAITING")]))
     sessions = await get_user_sessions(update.effective_user.id)
     await rich_progress_edit(
         ctx, update.effective_chat.id, progress_id,
@@ -1344,8 +1343,24 @@ async def remove_expired_id_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    progress_id = await rich_progress_send(
+        ctx, update.effective_chat.id,
+        progress_panel("🧹 EXPIRED ID CLEANUP", f"Account: <code>{html.escape(phone)}</code>", [
+            ("Phone validation", "Passed", "✅ DONE"),
+            ("Expired record lookup", "Running", "⏳ RUNNING"),
+            ("Database deletion", "Waiting", "⌛ WAITING"),
+        ])
+    )
     try:
         deleted = await delete_expired_session(phone)
+        await rich_progress_edit(
+            ctx, update.effective_chat.id, progress_id,
+            progress_panel("🧹 CLEANUP RESULT", f"Account: <code>{html.escape(phone)}</code>", [
+                ("Phone validation", "Passed", "✅ DONE"),
+                ("Expired record lookup", "Completed", "✅ DONE"),
+                ("Database deletion", f"{deleted} records deleted" if deleted else "No expired record found", "✅ DONE" if deleted else "⚠️ SKIPPED"),
+            ], "Cleanup operation finished.")
+        )
         if deleted:
             await send_rich_message(
                 update, ctx,
