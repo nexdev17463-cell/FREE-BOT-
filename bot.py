@@ -1001,7 +1001,7 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "<footer>🔐 Account numbers are masked for privacy</footer>"
         )
 
-    async def publish_progress(html_content: str, fallback_text: str, initial: bool = False):
+    async def publish_progress(html_content: str, fallback_text: str = "", initial: bool = False):
         nonlocal progress_message_id, progress_message
         rich_html = apply_custom_emojis(html_content)
         method = "sendRichMessage" if progress_message_id is None else "editMessageText"
@@ -1017,28 +1017,12 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 async with session.post(api_base + method, json=payload) as response:
                     result = await response.json(content_type=None)
                     if not response.ok or not result.get("ok"):
-                        raise RuntimeError(result.get("description", "Rich progress update failed"))
+                        raise RuntimeError(result.get("description", "Rich refresh progress update failed"))
                     if method == "sendRichMessage":
                         progress_message_id = result["result"]["message_id"]
             return
         except Exception as exc:
-            logging.debug("Rich refresh panel unavailable; using HTML fallback: %s", exc)
-
-        try:
-            if progress_message_id is None:
-                progress_message = await update.effective_message.reply_text(
-                    fallback_text, parse_mode=ParseMode.HTML
-                )
-                progress_message_id = progress_message.message_id
-            else:
-                await ctx.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=progress_message_id,
-                    text=fallback_text,
-                    parse_mode=ParseMode.HTML,
-                )
-        except Exception as exc:
-            logging.debug("Refresh fallback update skipped: %s", exc)
+            logging.warning("Rich refresh progress update failed; no normal-message fallback was sent: %s", exc)
 
     async def report_progress(index: int, total: int, phone: str, status: str):
         icon, label = {
@@ -2144,25 +2128,39 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         last = {"t": 0}
 
         async def cb(r):
-            now  = time.time()
+            now = time.time()
             done = r["success"] + r["failed"] + r["expired"]
             if now - last["t"] >= 1 or done >= total_expected:
                 last["t"] = now
+                progress_html = (
+                    "<h2>📡 REPORTING IN PROGRESS</h2>"
+                    f"<p><i>Target: <code>{html.escape(target)}</code></i></p><hr/>"
+                    "<table bordered striped>"
+                    "<tr><th>RESULT</th><th>COUNT</th></tr>"
+                    f"<tr><td>✅ Success</td><td><b>{r['success']}</b></td></tr>"
+                    f"<tr><td>❌ Failed</td><td><b>{r['failed']}</b></td></tr>"
+                    f"<tr><td>🔴 Expired</td><td><b>{r['expired']}</b></td></tr>"
+                    f"<tr><td>📊 Done</td><td><b>{done} / {total_expected}</b></td></tr>"
+                    "</table>"
+                    "<footer>Report operation is running…</footer>"
+                )
+                payload = {
+                    "chat_id": report_chat_id,
+                    "message_id": sent_msg_id,
+                    "rich_message": {"html": apply_custom_emojis(progress_html)},
+                }
                 try:
-                    await ctx.bot.edit_message_text(
-                        chat_id=report_chat_id,
-                        message_id=sent_msg_id,
-                        text=(
-                            f"📡 <b>Reporting in progress...</b>\n\n"
-                            f"✅ Success : <code>{r['success']}</code>\n"
-                            f"❌ Failed  : <code>{r['failed']}</code>\n"
-                            f"🔴 Expired : <code>{r['expired']}</code>\n"
-                            f"📊 Done    : <code>{done} / {total_expected}</code>"
-                        ),
-                        parse_mode=ParseMode.HTML,
-                    )
-                except Exception:
-                    pass
+                    timeout = aiohttp.ClientTimeout(total=15)
+                    async with aiohttp.ClientSession(timeout=timeout) as session:
+                        async with session.post(
+                            f"https://api.telegram.org/bot{ctx.bot.token}/editMessageText",
+                            json=payload,
+                        ) as response:
+                            result = await response.json(content_type=None)
+                            if not response.ok or not result.get("ok"):
+                                raise RuntimeError(result.get("description", "Rich report progress update failed"))
+                except Exception as exc:
+                    logging.warning("Rich report progress update failed; no normal-message edit was sent: %s", exc)
 
         result = await mass_report(
             sessions, target, reason, count, report_message, progress_cb=cb
