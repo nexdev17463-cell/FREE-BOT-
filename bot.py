@@ -2249,6 +2249,30 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return ADD_PHONE
 
+    # Prevent requesting OTP or replacing an already-hosted active session.
+    try:
+        existing_sessions = await get_all_sessions()
+    except Exception:
+        logging.exception("Could not check whether phone is already hosted")
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ DATABASE CHECK FAILED</h2>"
+            "<p>Could not verify whether this account is already hosted.</p>"
+            "<footer>Please try again later. No OTP was requested.</footer>",
+            cancel_kb()
+        )
+        return ADD_PHONE
+
+    if any(str(item.get("phone", "")).strip() == phone for item in existing_sessions):
+        await send_rich_message(
+            update, ctx,
+            "<h2>⚠️ ACCOUNT ALREADY HOSTED</h2>"
+            f"<p><code>{html.escape(phone)}</code> is already hosted in this bot.</p>"
+            "<footer>No OTP was sent and the existing session was left unchanged.</footer>",
+            cancel_kb()
+        )
+        return ADD_PHONE
+
     try:
         from pyrogram import Client
 
