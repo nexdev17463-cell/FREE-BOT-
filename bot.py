@@ -292,6 +292,58 @@ CUSTOM_EMOJI_IDS = {
     "🔎": "5348282577662778261",
 }
 
+
+async def rich_progress_send(ctx, chat_id: int, rich_html: str):
+    """Send a Rich Message progress panel without switching to plain-message UI."""
+    api_url = f"https://api.telegram.org/bot{ctx.bot.token}/sendRichMessage"
+    payload = {"chat_id": chat_id, "rich_message": {"html": apply_custom_emojis(rich_html)}}
+    try:
+        timeout = aiohttp.ClientTimeout(total=20)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(api_url, json=payload) as response:
+                result = await response.json(content_type=None)
+                if not response.ok or not result.get("ok"):
+                    raise RuntimeError(result.get("description", "Rich progress send failed"))
+                return result["result"]["message_id"]
+    except Exception:
+        logging.exception("Could not send Rich progress message")
+        return None
+
+
+async def rich_progress_edit(ctx, chat_id: int, message_id: int, rich_html: str):
+    """Edit a progress panel using Rich Message API only."""
+    if not message_id:
+        return False
+    api_url = f"https://api.telegram.org/bot{ctx.bot.token}/editMessageText"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "rich_message": {"html": apply_custom_emojis(rich_html)},
+    }
+    try:
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(api_url, json=payload) as response:
+                result = await response.json(content_type=None)
+                if not response.ok or not result.get("ok"):
+                    raise RuntimeError(result.get("description", "Rich progress edit failed"))
+        return True
+    except Exception:
+        logging.exception("Could not update Rich progress message")
+        return False
+
+
+def progress_panel(title: str, subtitle: str, rows: list, footer: str = "Please wait…") -> str:
+    table_rows = "".join(
+        f"<tr><td>{label}</td><td><b>{value}</b></td><td>{state}</td></tr>"
+        for label, value, state in rows
+    )
+    return (
+        f"<h1>{title}</h1><p><i>{subtitle}</i></p><hr/>"
+        "<table bordered striped><tr><th>STEP</th><th>DETAIL</th><th>STATUS</th></tr>"
+        f"{table_rows}</table><footer>{footer}</footer>"
+    )
+
 def apply_custom_emojis(rich_html: str) -> str:
     """Replace collected Unicode emoji with Telegram custom-emoji HTML tags."""
     for emoji, custom_id in sorted(CUSTOM_EMOJI_IDS.items(), key=lambda item: len(item[0]), reverse=True):
@@ -724,7 +776,23 @@ async def edit_status_summary(ctx, chat_id: int, message_id: int, counts: dict):
 async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update, ctx):
         return
+    progress_id = await rich_progress_send(
+        ctx, update.effective_chat.id,
+        progress_panel("📊 ACCOUNT STATUS", "Collecting session statistics", [
+            ("Fetch session records", "Running", "⏳ RUNNING"),
+            ("Calculate active / expired", "Pending", "⌛ WAITING"),
+            ("Prepare status summary", "Pending", "⌛ WAITING"),
+        ])
+    )
     records = await get_all_status_sessions()
+    await rich_progress_edit(
+        ctx, update.effective_chat.id, progress_id,
+        progress_panel("📊 ACCOUNT STATUS", "Calculating session statistics", [
+            ("Fetch session records", f"{len(records)} records", "✅ DONE"),
+            ("Calculate active / expired", "Complete", "✅ DONE"),
+            ("Prepare status summary", "In progress", "⏳ RUNNING"),
+        ])
+    )
     counts = {
         "active": sum(1 for item in records if item.get("active", False)),
         "expired": sum(1 for item in records if not item.get("active", False)),
@@ -1097,7 +1165,23 @@ async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update, ctx):
         return
     from session_manager import get_user_sessions
+    progress_id = await rich_progress_send(
+        ctx, update.effective_chat.id,
+        progress_panel("📋 SESSION OVERVIEW", "Loading your saved accounts", [
+            ("Database query", "Running", "⏳ RUNNING"),
+            ("Prepare session list", "Pending", "⌛ WAITING"),
+            ("Render result", "Pending", "⌛ WAITING"),
+        ])
+    )
     sessions = await get_user_sessions(update.effective_user.id)
+    await rich_progress_edit(
+        ctx, update.effective_chat.id, progress_id,
+        progress_panel("📋 SESSION OVERVIEW", "Preparing your saved accounts", [
+            ("Database query", "Complete", "✅ DONE"),
+            ("Prepare session list", f"{len(sessions)} found", "✅ DONE"),
+            ("Render result", "Complete", "✅ DONE"),
+        ], "Session list is ready.")
+    )
     rows = "".join(
         f"<tr><td>{i}</td><td><code>{html.escape(str(item.get('phone','?')))}</code></td></tr>"
         for i, item in enumerate(sessions, 1)
@@ -1129,8 +1213,32 @@ async def unhost_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "<footer>⚠️ This removes the saved session. Make sure the number is correct before proceeding.</footer>"
         )
         return
-    phone   = ctx.args[0].strip()
+    phone = ctx.args[0].strip()
+    progress_id = await rich_progress_send(
+        ctx, update.effective_chat.id,
+        progress_panel("🗑 ACCOUNT REMOVAL", f"Account: <code>{html.escape(phone)}</code>", [
+            ("Locate owned session", "Checking", "⏳ RUNNING"),
+            ("Remove session record", "Pending", "⌛ WAITING"),
+            ("Finalize", "Pending", "⌛ WAITING"),
+        ])
+    )
+    await rich_progress_edit(
+        ctx, update.effective_chat.id, progress_id,
+        progress_panel("🗑 ACCOUNT REMOVAL", f"Account: <code>{html.escape(phone)}</code>", [
+            ("Locate owned session", "Complete", "✅ DONE"),
+            ("Remove session record", "In progress", "⏳ RUNNING"),
+            ("Finalize", "Pending", "⌛ WAITING"),
+        ])
+    )
     removed = await delete_session(phone, update.effective_user.id)
+    await rich_progress_edit(
+        ctx, update.effective_chat.id, progress_id,
+        progress_panel("🗑 ACCOUNT REMOVAL", f"Account: <code>{html.escape(phone)}</code>", [
+            ("Locate owned session", "Complete", "✅ DONE"),
+            ("Remove session record", "Removed" if removed else "Not found", "✅ DONE" if removed else "⚠️ SKIPPED"),
+            ("Finalize", "Complete", "✅ DONE"),
+        ], "Removal process finished.")
+    )
     if removed:
         await send_rich_message(
             update, ctx,
@@ -1173,8 +1281,32 @@ async def remove_expired_id_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     phone = ctx.args[0].strip()
 
     if phone.lower() == "all":
+        progress_id = await rich_progress_send(
+            ctx, update.effective_chat.id,
+            progress_panel("🧹 EXPIRED ID CLEANUP", "Bulk database cleanup", [
+                ("Find expired records", "active=False", "⏳ RUNNING"),
+                ("Delete expired records", "Pending", "⌛ WAITING"),
+                ("Preserve active records", "Protected", "🛡️ SAFE"),
+            ])
+        )
+        await rich_progress_edit(
+            ctx, update.effective_chat.id, progress_id,
+            progress_panel("🧹 EXPIRED ID CLEANUP", "Bulk database cleanup", [
+                ("Find expired records", "active=False", "✅ FILTER SET"),
+                ("Delete expired records", "In progress", "⏳ RUNNING"),
+                ("Preserve active records", "Protected", "🛡️ SAFE"),
+            ])
+        )
         try:
             deleted = await delete_all_expired_sessions()
+            await rich_progress_edit(
+                ctx, update.effective_chat.id, progress_id,
+                progress_panel("✅ CLEANUP COMPLETE", "Expired session cleanup", [
+                    ("Deleted expired records", str(deleted), "✅ DONE"),
+                    ("Active records", "Not targeted", "🛡️ SAFE"),
+                    ("Database operation", "Completed", "✅ DONE"),
+                ], "Only records marked inactive were deleted.")
+            )
             await send_rich_message(
                 update, ctx,
                 "<h1>🧹 EXPIRED ID CLEANUP COMPLETE</h1>"
@@ -2249,6 +2381,17 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return ADD_PHONE
 
+    progress_id = await rich_progress_send(
+        ctx, update.effective_chat.id,
+        progress_panel("➕ ACCOUNT HOSTING", f"Account: <code>{html.escape(phone)}</code>", [
+            ("Phone validation", "Passed", "✅ DONE"),
+            ("Telegram connection", "Connecting", "⏳ RUNNING"),
+            ("OTP delivery", "Pending", "⌛ WAITING"),
+            ("Session storage", "Pending", "⌛ WAITING"),
+        ])
+    )
+    tmp[uid] = {"progress_id": progress_id, "progress_chat_id": update.effective_chat.id}
+
     try:
         from pyrogram import Client
 
@@ -2270,12 +2413,21 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await client.connect()
         sent_code = await client.send_code(phone)
-        tmp[uid]  = {
-            "client":          client,
-            "phone":           phone,
+        tmp[uid].update({
+            "client": client,
+            "phone": phone,
             "phone_code_hash": sent_code.phone_code_hash,
-            "client_type":     "pyrogram",
-        }
+            "client_type": "pyrogram",
+        })
+        await rich_progress_edit(
+            ctx, update.effective_chat.id, progress_id,
+            progress_panel("🔑 OTP VERIFICATION", f"Account: <code>{html.escape(phone)}</code>", [
+                ("Phone validation", "Passed", "✅ DONE"),
+                ("Telegram connection", "Connected", "✅ DONE"),
+                ("OTP delivery", "Sent to Telegram", "✅ DONE"),
+                ("Session storage", "Waiting for verification", "⌛ WAITING"),
+            ], "Enter the OTP in the chat to continue. The code is not displayed here.")
+        )
         await send_rich_message(
             update, ctx,
             "<h2>🔑 OTP SENT</h2>"
