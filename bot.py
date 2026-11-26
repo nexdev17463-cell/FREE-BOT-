@@ -16,7 +16,7 @@ from session_manager import (
     save_session, get_all_sessions, delete_session,
     get_total_count, get_active_count, get_expired_count,
     get_expired_sessions, get_all_status_sessions, refresh_all_sessions,
-    delete_expired_session
+    delete_expired_session, delete_all_expired_sessions
 )
 from access_manager import (
     is_owner, is_sudo, remember_user, add_sudo, remove_sudo, list_access_users
@@ -1167,11 +1167,33 @@ async def remove_expired_id_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "<h1>🗑 REMOVE EXPIRED ID</h1>"
             "<p>Enter the exact phone number of an account already listed as expired.</p>"
             "<p>Usage: <code>/removeexpiredid +919876543210</code></p>"
+            "<p>Remove all expired IDs: <code>/removeexpiredid all</code></p>"
             "<footer>⚠️ The saved session record will be permanently deleted.</footer>"
         )
         return
 
     phone = ctx.args[0].strip()
+
+    if phone.lower() == "all":
+        try:
+            deleted = await delete_all_expired_sessions()
+            await send_rich_message(
+                update, ctx,
+                "<h1>🧹 EXPIRED ID CLEANUP COMPLETE</h1>"
+                f"<p>🗑 Deleted expired session records: <b>{deleted}</b></p>"
+                "<footer>Only records marked as expired were removed. Active sessions were kept safe.</footer>",
+                main_menu_kb()
+            )
+        except Exception:
+            logging.exception("Failed to remove all expired sessions")
+            await send_rich_message(
+                update, ctx,
+                "<h2>❌ DATABASE ERROR</h2>"
+                "<p>Expired sessions could not be deleted. No success was reported.</p>",
+                main_menu_kb()
+            )
+        return
+
     if not re.fullmatch(r"\+[1-9]\d{7,14}", phone):
         await send_rich_message(
             update, ctx,
