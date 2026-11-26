@@ -15,7 +15,8 @@ from config import BOT_TOKEN, API_ID, API_HASH, OWNER_ID, OWNER_USERNAME
 from session_manager import (
     save_session, get_all_sessions, delete_session,
     get_total_count, get_active_count, get_expired_count,
-    get_expired_sessions, get_all_status_sessions, refresh_all_sessions
+    get_expired_sessions, get_all_status_sessions, refresh_all_sessions,
+    delete_expired_session
 )
 from access_manager import (
     is_owner, is_sudo, remember_user, add_sudo, remove_sudo, list_access_users
@@ -1152,6 +1153,61 @@ async def unhost_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             update, ctx,
             f"<h2>ⓘ SESSION NOT FOUND</h2><p>No saved session matches <code>{html.escape(phone)}</code>.</p>",
             main_menu_kb()
+        )
+
+
+# ── /removeexpiredid ─────────────────────────────────────────────────────────
+async def remove_expired_id_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    # Permanent cross-user deletion is restricted to the bot owner.
+    if not is_owner(update.effective_user.id):
+        await send_access_denied(update, ctx)
+        return
+
+    if not ctx.args:
+        await send_rich_message(
+            update, ctx,
+            "<h1>🗑 REMOVE EXPIRED ID</h1>"
+            "<p>Enter the exact phone number of an account already listed as expired.</p>"
+            "<p>Usage: <code>/removeexpiredid +919876543210</code></p>"
+            "<footer>⚠️ The saved session record will be permanently deleted.</footer>"
+        )
+        return
+
+    phone = ctx.args[0].strip()
+    if not re.fullmatch(r"\\+[1-9]\\d{7,14}", phone):
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ INVALID PHONE NUMBER</h2>"
+            "<p>Use international format, for example:</p>"
+            "<p><code>/removeexpiredid +919876543210</code></p>"
+        )
+        return
+
+    try:
+        deleted = await delete_expired_session(phone)
+        if deleted:
+            await send_rich_message(
+                update, ctx,
+                "<h1>✅ EXPIRED ID REMOVED</h1>"
+                f"<p>📱 Number: <code>{html.escape(phone)}</code></p>"
+                f"<p>🗑 Deleted database records: <b>{deleted}</b></p>"
+                "<footer>The expired session is permanently removed from the bot's session database.</footer>",
+                main_menu_kb()
+            )
+        else:
+            await send_rich_message(
+                update, ctx,
+                "<h1>ℹ️ EXPIRED ID NOT FOUND</h1>"
+                f"<p><code>{html.escape(phone)}</code> is not currently present in the expired sessions list.</p>"
+                "<footer>No database data was deleted.</footer>",
+                main_menu_kb()
+            )
+    except Exception as exc:
+        logging.exception("Failed to remove expired session for %s", phone)
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ DATABASE ERROR</h2>"
+            "<p>The expired session could not be removed. No success was reported.</p>"
         )
 
 
@@ -2356,6 +2412,7 @@ def main():
     app.add_handler(CommandHandler("refresh",    refresh_cmd))
     app.add_handler(CommandHandler("session",    session_cmd))
     app.add_handler(CommandHandler("unhost",     unhost_cmd))
+    app.add_handler(CommandHandler("removeexpiredid", remove_expired_id_cmd))
     app.add_handler(CommandHandler("help",       help_cmd))
     app.add_handler(CommandHandler("join",       join_cmd))
     app.add_handler(CommandHandler("leave",      leave_cmd))
@@ -2377,6 +2434,7 @@ def main():
             BotCommand("refresh",    "Verify all sessions"),
             BotCommand("session",    "List your sessions"),
             BotCommand("unhost",     "Remove a session by phone"),
+            BotCommand("removeexpiredid", "Permanently remove an expired ID"),
             BotCommand("join",       "Join with all accounts"),
             BotCommand("leave",      "Leave a chat with all accounts"),
             BotCommand("sudoinfo",   "Access directory"),
