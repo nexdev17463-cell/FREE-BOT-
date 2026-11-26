@@ -61,6 +61,10 @@ tmp = {}
 async def has_access(user_id: int) -> bool:
     return is_owner(user_id) or await is_sudo(user_id)
 
+# Use the configured owner username, falling back to the optional default contact.
+OWNER_CONTACT_USERNAME = (OWNER_USERNAME or "SAREEF_FUCKER").strip().lstrip("@") or "SAREEF_FUCKER"
+OWNER_CONTACT = html.escape("@" + OWNER_CONTACT_USERNAME)
+
 ACCESS_DENIED_HTML = (
     "<h1>🔒 ACCESS DENIED</h1>"
     "<hr/>"
@@ -68,7 +72,7 @@ ACCESS_DENIED_HTML = (
     "<p>This command is restricted to Owner &amp; Sudo Users only.</p>"
     "<h2>👑 Need Full Bot Access?</h2>"
     "<p>Contact the Bot Owner to request Sudo Access.</p>"
-    "<p>👤 Owner: <b>@NODDY_FUCKER</b></p>"
+    f"<p>👤 Owner: <b>{OWNER_CONTACT}</b></p>"
     "<hr/>"
     "<footer>🛡️ SECURE ACCESS • AUTHORIZED USERS ONLY</footer>"
 )
@@ -1459,7 +1463,7 @@ async def sudoinfo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
     rich = (
         "<h1>💎 ACCESS DIRECTORY</h1><p><i>👑 Owner and 🛡️ authorized administrators</i></p><hr/>"
-        f"<p>👑 <b>BOT OWNER</b><br/>🆔 <code>{OWNER_ID}</code> · {html.escape(OWNER_USERNAME)}</p>"
+        f"<p>👑 <b>BOT OWNER</b><br/>🆔 <code>{OWNER_ID}</code> · {OWNER_CONTACT}</p>"
         "<h2>💠 SUDO ADMINISTRATORS</h2>"
         + ("<table bordered striped><tr><th>NAME</th><th>USERNAME</th><th>USER ID</th></tr>"
            + table_rows + "</table>" if table_rows else "<p>No additional sudo users are registered.</p>")
