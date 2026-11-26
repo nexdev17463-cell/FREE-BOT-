@@ -57,6 +57,16 @@ async def mark_active(phone: str):
 async def get_expired_sessions() -> list[dict]:
     return await get_db().sessions.find({"active": False}).sort("phone", 1).to_list(length=None)
 
+
+async def delete_expired_session(phone: str) -> int:
+    """Permanently delete all session documents for a phone only if it is expired."""
+    sessions = get_db().sessions
+    expired = await sessions.find_one({"phone": phone, "active": False}, {"_id": 1})
+    if not expired:
+        return 0
+    result = await sessions.delete_many({"phone": phone})
+    return result.deleted_count
+
 async def get_total_count() -> int:
     return await get_db().sessions.count_documents({})
 
