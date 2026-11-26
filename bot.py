@@ -1158,8 +1158,8 @@ async def unhost_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── /removeexpiredid ─────────────────────────────────────────────────────────
 async def remove_expired_id_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    # Permanent cross-user deletion is restricted to the bot owner.
-    if not is_owner(update.effective_user.id):
+    # Owner and authorized sudo users may permanently remove expired IDs.
+    if not await has_access(update.effective_user.id):
         await send_access_denied(update, ctx)
         return
 
