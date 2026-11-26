@@ -2249,7 +2249,6 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return ADD_PHONE
 
-    # Prevent requesting OTP or replacing an already-hosted active session.
     try:
         existing_sessions = await get_all_sessions()
     except Exception:
@@ -2273,15 +2272,14 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return ADD_PHONE
 
-    pyro_error = None
     try:
-        from pyrogram import Client as PyroClient
+        from pyrogram import Client
 
         OFFICIAL_API_ID   = 6
         OFFICIAL_API_HASH = "eb06d4abfb49dc3eeb1aeb98ae0f581e"
 
-        client = PyroClient(
-            name=f"host_{uid}",
+        client = Client(
+            name="host_" + str(uid),
             api_id=OFFICIAL_API_ID,
             api_hash=OFFICIAL_API_HASH,
             in_memory=True,
@@ -2294,4 +2292,6 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await client.connect()
         sent_code = await client.send_code(phone)
         tmp[uid] = {
-     
+            "client":          client,
+            "phone":           phone,
+            "phone_code_hash": sent_cod
