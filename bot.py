@@ -26,30 +26,30 @@ from proxy_manager import fetch_proxies, rotate_forever
 
 logging.basicConfig(level=logging.INFO)
 
-# ── Conversation states ──────────────────────────────────────────────────────
+# ── Conversation states ────────────────────────────────────────────────
 (
     ADD_PHONE, ADD_CODE, ADD_2FA,
     REPORT_TARGET, REPORT_REASON_CAT, REPORT_REASON_SUB,
     REPORT_MESSAGE, REPORT_COUNT, CONFIRM_REPORT,
 ) = range(9)
 
-# ── Report categories ────────────────────────────────────────────────────────
+# ── Report categories ────────────────────────────────────────────────
 REASONS = {
     "1":  ("😤 I don't like it",        []),
-    "2":  ("👶 Child Abuse",            [("2a","Child illegal abuse"),("2b","Child sexual abuse")]),
-    "3":  ("🔪 Violence",               [("3a","Insult / false info"),("3b","Graphic content"),
-                                         ("3c","Extreme violence"),("3d","Hate speech"),
-                                         ("3e","Calling for violence"),("3f","Terrorism")]),
-    "4":  ("🚫 Illegal Goods",          [("4a","Weapons"),("4b","Drugs"),("4c","Fake documents"),
-                                         ("4d","Counterfeit money"),("4e","Hacking tools"),
-                                         ("4f","Counterfeit merch"),("4g","Other")]),
-    "5":  ("🔞 Illegal Adult Content",  [("5a","Child abuse"),("5b","Illegal sexual service"),
-                                         ("5c","Animal abuse"),("5d","Non-consensual imagery"),
-                                         ("5e","Pornography"),("5f","Other")]),
-    "6":  ("🧾 Personal Data",          [("6a","Private images"),("6b","Private number"),
-                                         ("6c","Address"),("6d","Credentials"),("6e","Other")]),
-    "7":  ("💸 Scam or Fraud",          [("7a","Impersonation"),("7b","Financial scams"),
-                                         ("7c","Malware/phishing"),("7d","Fraudulent seller")]),
+    "2":  ("👶 Child Abuse",            [("…2a","Child illegal abuse"),("…2b","Child sexual abuse")]),
+    "3":  ("🔪 Violence",               [("…3a","Insult / false info"),("…3b","Graphic content"),
+                                         ("…3c","Extreme violence"),("…3d","Hate speech"),
+                                         ("…3e","Calling for violence"),("…3f","Terrorism")]),
+    "4":  ("🚫 Illegal Goods",          [("…4a","Weapons"),("…4b","Drugs"),("…4c","Fake documents"),
+                                         ("…4d","Counterfeit money"),("…4e","Hacking tools"),
+                                         ("…4f","Counterfeit merch"),("…4g","Other")]),
+    "5":  ("🔞 Illegal Adult Content",  [("…5a","Child abuse"),("…5b","Illegal sexual service"),
+                                         ("…5c","Animal abuse"),("…5d","Non-consensual imagery"),
+                                         ("…5e","Pornography"),("…5f","Other")]),
+    "6":  ("🧧 Personal Data",          [("…6a","Private images"),("…6b","Private number"),
+                                         ("…6c","Address"),("…6d","Credentials"),("…6e","Other")]),
+    "7":  ("💸 Scam or Fraud",          [("…7a","Impersonation"),("…7b","Financial scams"),
+                                         ("…7c","Malware/phishing"),("…7d","Fraudulent seller")]),
     "8":  ("©️ Copyright",              []),
     "9":  ("🔎 Other",                  []),
     "10": ("⚠️ Not illegal but remove", []),
@@ -57,12 +57,17 @@ REASONS = {
 
 tmp = {}
 
+# ── Per-user background task registry ───────────────────────────────────
+# key: "{user_id}:{msg_id}" → asyncio.Task
+_active_tasks: dict = {}
+# key: "{user_id}:{msg_id}" → asyncio.Event  (set = cancel requested)
+_cancel_events: dict = {}
 
-# ── Access helpers ───────────────────────────────────────────────────────────
+
+# ── Access helpers ────────────────────────────────────────────────
 async def has_access(user_id: int) -> bool:
     return is_owner(user_id) or await is_sudo(user_id)
 
-# Use the configured owner username, falling back to the optional default contact.
 OWNER_CONTACT_USERNAME = (OWNER_USERNAME or "SAREEF_FUCKER").strip().lstrip("@") or "SAREEF_FUCKER"
 OWNER_CONTACT = html.escape("@" + OWNER_CONTACT_USERNAME)
 
@@ -96,22 +101,17 @@ async def require_access(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> bool
     await send_access_denied(update, ctx, edit=bool(update.callback_query))
     return False
 
-# ── Keyboards ────────────────────────────────────────────────────────────────
+# ── Keyboards ────────────────────────────────────────────────
 _BTN_STYLES = ["primary", "success", "danger"]
 
-# Unicode small-cap lettering inspired by the supplied button screenshot.
-# Telegram buttons do not support custom font files, so use Unicode glyphs.
 _BUTTON_SMALL_CAPS = str.maketrans({
     "a": "ᴀ", "b": "ʙ", "c": "ᴄ", "d": "ᴅ", "e": "ᴇ",
-    "f": "ꜰ", "g": "ɢ", "h": "ʜ", "i": "ɪ", "j": "ᴊ",
+    "f": "\ua730", "g": "ɢ", "h": "ʜ", "i": "ɪ", "j": "ᴊ",
     "k": "ᴋ", "l": "ʟ", "m": "ᴍ", "n": "ɴ", "o": "ᴏ",
-    "p": "ᴘ", "q": "ꞯ", "r": "ʀ", "s": "ꜱ", "t": "ᴛ",
+    "p": "ᴘ", "q": "\ua76f", "r": "ʀ", "s": "\ua731", "t": "ᴛ",
     "u": "ᴜ", "v": "ᴠ", "w": "ᴡ", "x": "x", "y": "ʏ", "z": "ᴢ",
 })
 
-
-# Custom emoji icons supported by Telegram Bot API 9.4 / python-telegram-bot 22.7.
-# The UPDATE artwork supplied by the owner is used for every Refresh button.
 _BUTTON_CUSTOM_EMOJI_IDS = {
     "🔄": "5375338737028841420",
     "👑": "6321314543922323466",
@@ -121,7 +121,7 @@ _BUTTON_CUSTOM_EMOJI_IDS = {
     "🚀": "5188481279963715781",
     "🤖": "6321144798224850562",
     "🔑": "5420094143089111506",
-    "🟪": "6276238759071586100",
+    "🟧": "6276238759071586100",
     "✅": "5190782321577441092",
     "📊": "5042290883949495533",
     "🆙": "5375338737028841420",
@@ -153,7 +153,6 @@ _BUTTON_CUSTOM_EMOJI_IDS = {
     "📱": "5426991207731437507",
     "⭐": "6280502836962794866",
     "🌟": "6242282747629413332",
-    # ── Added emoji IDs ──────────────────────────────────────────────────────
     "⏳": "5386367538735104399",
     "🚫": "6098120323503235997",
     "🕐": "5400258343438655703",
@@ -161,7 +160,7 @@ _BUTTON_CUSTOM_EMOJI_IDS = {
     "👶": "5454407470040491470",
     "🔪": "5258061163203148267",
     "🔞": "5472183128497862606",
-    "🧾": "6289752212243483195",
+    "🧧": "6289752212243483195",
     "💸": "5949785441728205181",
     "©️": "5458496841547015692",
     "📂": "5167958401510016217",
@@ -172,7 +171,6 @@ _BUTTON_CUSTOM_EMOJI_IDS = {
 
 def btn(text: str, data: str) -> InlineKeyboardButton:
     icon_custom_emoji_id = None
-    # Use a real custom emoji icon when the leading Unicode emoji has a mapped ID.
     for emoji, custom_id in sorted(
         _BUTTON_CUSTOM_EMOJI_IDS.items(), key=lambda item: len(item[0]), reverse=True
     ):
@@ -191,14 +189,25 @@ def btn(text: str, data: str) -> InlineKeyboardButton:
     )
 
 
+def stop_progress_kb(owner_uid: int, msg_id: int) -> InlineKeyboardMarkup:
+    """Stop Progress button shown during live operations."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            "ᴄᴀɴᴄᴇʟ  ᴘʀᴏɢʀᴇᴄᴄ",
+            callback_data=f"stop_progress:{owner_uid}:{msg_id}",
+            icon_custom_emoji_id="6098120323503235997",
+            style="danger",
+        )
+    ]])
+
+
 def main_menu_kb() -> InlineKeyboardMarkup:
     developer_button = InlineKeyboardButton(
-        "◈ 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ◈",
+        "◈ 𝗗𝗘𝗙𝗛𝗜𝗓𝗖𝗘𝗥 ◈",
         url="https://t.me/SAREEF_FUCKER",
         style="danger",
         icon_custom_emoji_id="6091123254842366873",
     )
-
     return InlineKeyboardMarkup([
         [btn("➕ Add Account", "add_account"), btn("📊 Status", "status")],
         [btn("🚨 Mass Report", "start_report"), btn("📋 Sessions", "sessions")],
@@ -232,8 +241,6 @@ def refresh_view_kb() -> InlineKeyboardMarkup:
     ])
 
 
-# Telegram Custom Emoji IDs collected from the user's Premium emoji pack.
-# Unicode alternatives remain inside each tag as a compatibility fallback.
 CUSTOM_EMOJI_IDS = {
     "👑": "6321314543922323466",
     "💎": "6264791387032523779",
@@ -243,7 +250,7 @@ CUSTOM_EMOJI_IDS = {
     "🤖": "6321144798224850562",
     "🔤": "5870972873450984431",
     "🔑": "5420094143089111506",
-    "🟪": "6276238759071586100",
+    "🟧": "6276238759071586100",
     "✅": "5190782321577441092",
     "📊": "5042290883949495533",
     "🆙": "5375338737028841420",
@@ -276,7 +283,6 @@ CUSTOM_EMOJI_IDS = {
     "⭐": "6280502836962794866",
     "🌟": "6242282747629413332",
     "📱": "5426991207731437507",
-    # ── Added emoji IDs ────────────────────────────────────────────────────
     "⏳": "5386367538735104399",
     "🚫": "6098120323503235997",
     "🕐": "5400258343438655703",
@@ -284,7 +290,7 @@ CUSTOM_EMOJI_IDS = {
     "👶": "5454407470040491470",
     "🔪": "5258061163203148267",
     "🔞": "5472183128497862606",
-    "🧾": "6289752212243483195",
+    "🧧": "6289752212243483195",
     "💸": "5949785441728205181",
     "©️": "5458496841547015692",
     "📂": "5167958401510016217",
@@ -293,7 +299,6 @@ CUSTOM_EMOJI_IDS = {
 }
 
 def apply_custom_emojis(rich_html: str) -> str:
-    """Replace collected Unicode emoji with Telegram custom-emoji HTML tags."""
     for emoji, custom_id in sorted(CUSTOM_EMOJI_IDS.items(), key=lambda item: len(item[0]), reverse=True):
         rich_html = rich_html.replace(
             emoji,
@@ -301,10 +306,9 @@ def apply_custom_emojis(rich_html: str) -> str:
         )
     return rich_html
 
-# ── Premium message presentation (UI only) ───────────────────────────────────
+# ── Premium message presentation ────────────────────────────────────────────────
 async def send_rich_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
                             rich_html: str, reply_markup=None, edit: bool = False):
-    """Render safe informational UI with Telegram Rich Messages; keep a HTML fallback."""
     chat_id = update.effective_chat.id
     rich_html = apply_custom_emojis(rich_html)
     api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
@@ -345,12 +349,10 @@ async def send_rich_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
         )
 
 
-# ── Rich edit helper (for non-callback message edits by message_id) ──────────
 async def _rich_edit_by_id(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
                            message_id: int, rich_html: str,
                            reply_markup=None, fallback_text: str = None,
                            fallback_markup=None):
-    """Edit an existing message by message_id using Rich Message API; HTML fallback."""
     api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
     payload = {
         "chat_id": chat_id,
@@ -383,7 +385,6 @@ async def _rich_edit_by_id(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
             logging.warning("Fallback edit also failed: %s", exc2)
 
 
-# ── Rich blocks send helper (returns message_id; HTML fallback) ──────────────
 async def _rich_send_blocks_new(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
                                 blocks: list, fallback_html: str,
                                 reply_markup=None, fallback_text: str = None,
@@ -411,11 +412,9 @@ async def _rich_send_blocks_new(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
         return msg.message_id
 
 
-# ── Rich send helper (returns message_id; HTML fallback) ─────────────────────
 async def _rich_send_new(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
                          rich_html: str, reply_markup=None,
                          fallback_text: str = None, fallback_markup=None) -> int:
-    """Send a new Rich Message and return the message_id; HTML fallback on failure."""
     api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
     payload = {
         "chat_id": chat_id,
@@ -447,12 +446,39 @@ async def _rich_send_new(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
     return None
 
 
-# ── /start ───────────────────────────────────────────────────────────────────
+# ── Task registry helpers ────────────────────────────────────────────────
+def _task_key(uid: int, msg_id: int) -> str:
+    return f"{uid}:{msg_id}"
+
+def _register_task(uid: int, msg_id: int, task: asyncio.Task, cancel_event: asyncio.Event):
+    key = _task_key(uid, msg_id)
+    _active_tasks[key] = task
+    _cancel_events[key] = cancel_event
+
+def _unregister_task(uid: int, msg_id: int):
+    key = _task_key(uid, msg_id)
+    _active_tasks.pop(key, None)
+    _cancel_events.pop(key, None)
+
+def _get_cancel_event(uid: int, msg_id: int) -> asyncio.Event | None:
+    return _cancel_events.get(_task_key(uid, msg_id))
+
+def _get_user_tasks(uid: int) -> list:
+    """Return list of (msg_id, task) for a user."""
+    result = []
+    for key, task in list(_active_tasks.items()):
+        k_uid, k_mid = key.split(":", 1)
+        if int(k_uid) == uid:
+            result.append((int(k_mid), task))
+    return result
+
+
+# ── /start ────────────────────────────────────────────────────────────────
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await remember_user(update.effective_user)
 
     welcome_html = (
-        "<h1>⭐ 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 𝗠𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 𝗕𝗢𝗧</h1>"
+        "<h1>⭐ 𝗗𝗘𝗓𝗚𝗢𝗘 𝗧𝗢 𝗠𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 𝗕𝗢𝗧</h1>"
         "<p><i>Your account management command center</i></p>"
         "<hr/>"
         "<h2>🚀 Get Started</h2>"
@@ -499,34 +525,35 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
 
-# ── /help ────────────────────────────────────────────────────────────────────
+# ── /help ────────────────────────────────────────────────────────────────
 async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     priv = await has_access(uid)
     owner = is_owner(uid)
 
-    # Telegram Rich Messages render real headings and bordered tables.
     rows_account = (
         "<table bordered striped>"
         "<tr><th>Command</th><th>Description</th></tr>"
         "<tr><td><mark><b>/start</b></mark></td><td>Open the bot menu.</td></tr>"
         "<tr><td><mark><b>/host</b></mark></td><td>Connect your own Telegram account (OTP / optional 2FA).</td></tr>"
+        "<tr><td><mark><b>/addsession &lt;string&gt;</b></mark></td><td>Add a session directly via string session.</td></tr>"
         "<tr><td><mark><b>/cancel</b></mark></td><td>Cancel the current setup.</td></tr>"
+        "<tr><td><mark><b>/stop</b></mark></td><td>Stop your currently running background operation.</td></tr>"
         "<tr><td><mark><b>/help</b></mark></td><td>Show this command guide.</td></tr>"
         "</table>"
     )
 
     rich_html = (
-        "<h1>🤖 𝗠𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 𝗕𝗢𝗧</h1>"
+        "<h1>🤖 𝗘𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 𝗕𝗢𝗧</h1>"
         "<p><i>⭐ COMMAND CENTER  ·  QUICK REFERENCE ⭐</i></p>"
         "<hr/>"
-        "<h2>👤 𝗔ᴄᴄᴏᴜɴᴛ &amp; 𝗠ᴇɴᴜ</h2>"
+        "<h2>👤 𝗔ᴄᴄᴏᴜɴᴛ &amp; 𝗘ᴇɴᴜ</h2>"
         + rows_account
     )
 
     if priv:
         rich_html += (
-            "<h2>⚙️ 𝗕ᴏᴛ 𝗢ᴘᴇʀᴀᴛɪᴏɴꜱ</h2>"
+            "<h2>⚙️ 𝗕ᴏᴛ 𝗢ᴘᴇʀᴀᴛɪᴏɴᴄ</h2>"
             "<table bordered striped>"
             "<tr><th>Command</th><th>Description</th></tr>"
             "<tr><td><mark><b>/status</b></mark></td><td>View session statistics.</td></tr>"
@@ -540,7 +567,7 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if owner:
         rich_html += (
-            "<h2>👑 𝗢ᴡɴᴇʀ 𝗖ᴏɴᴛʀᴏʟꜱ</h2>"
+            "<h2>👑 𝗢ᴡɴᴇʀ 𝗖ᴏɴᴛʀᴏʟᴄ</h2>"
             "<table bordered striped>"
             "<tr><th>Command</th><th>Description</th></tr>"
             "<tr><td><mark><b>/sudo USER_ID</b></mark></td><td>Grant Sudo access.</td></tr>"
@@ -550,17 +577,16 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if priv:
         rich_html += (
-            "<h2>🔐 𝗔ᴄᴄᴇꜱꜱ 𝗟ᴇᴠᴇʟ</h2>"
+            "<h2>🔐 𝗔ᴄᴄᴇᴄ 𝗣ᴇʀᴄᴇɪᴄɪᴏɴ</h2>"
             "<p><b>Owner / Sudo</b> · Authorized bot operations.</p>"
         )
     else:
         rich_html += (
-            "<h2>🔐 𝗔ᴄᴄᴇꜱꜱ</h2>"
+            "<h2>🔐 𝗔ᴄᴄᴇᴄ</h2>"
             "<p>Some operations are restricted to Owner / Sudo.</p>"
         )
 
     rich_html += (
-        "<hr/>"
         "<hr/>"
         "<footer><i>Designed for clear, responsible account management</i> · Only use accounts you own or are authorized to manage.</footer>"
     )
@@ -598,17 +624,19 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except Exception as exc:
         logging.warning("Rich help message unavailable; using standard help fallback: %s", exc)
         fallback = (
-            "🤖 <b>𝗠𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 𝗕𝗢𝗧</b>\n"
+            "🤖 <b>𝗘𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 𝗕𝗢𝗧</b>\n"
             "<i>⭐ COMMAND CENTER · QUICK REFERENCE ⭐</i>\n\n"
-            "<b>👤 𝗔ᴄᴄᴏᴜɴᴛ &amp; 𝗠ᴇɴᴜ</b>\n"
+            "<b>👤 𝗔ᴄᴄᴏᴜɴᴛ &amp; 𝗘ᴇɴᴜ</b>\n"
             "<b>/start</b> — Open the bot menu\n"
             "<b>/host</b> — Connect your own account (OTP / optional 2FA)\n"
+            "<b>/addsession &lt;string&gt;</b> — Add session via string session\n"
+            "<b>/stop</b> — Stop your running background operation\n"
             "<b>/cancel</b> — Cancel the current setup\n"
             "<b>/help</b> — Show this guide\n"
         )
         if priv:
             fallback += (
-                "\n<b>⚙️ 𝗕ᴏᴛ 𝗢ᴘᴇʀᴀᴛɪᴏɴꜱ</b>\n"
+                "\n<b>⚙️ 𝗕ᴏᴛ 𝗢ᴘᴇʀᴀᴛɪᴏɴᴄ</b>\n"
                 "<b>/status</b> — View session statistics\n"
                 "<b>/refresh</b> — Verify saved session status\n"
                 "<b>/session</b> — List saved sessions\n"
@@ -618,11 +646,11 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         if owner:
             fallback += (
-                "\n<b>👑 𝗢ᴡɴᴇʀ 𝗖ᴏɴᴛʀᴏʟꜱ</b>\n"
+                "\n<b>👑 𝗢ᴡɴᴇʀ 𝗖ᴏɴᴛʀᴏʟᴄ</b>\n"
                 "<b>/sudo USER_ID</b> — Grant Sudo access\n"
                 "<b>/removesudo USER_ID</b> — Revoke Sudo access\n"
             )
-        fallback += "\n<b>🔐 𝗔ᴄᴄᴇꜱꜱ</b>\nOwner / Sudo: authorized bot operations."
+        fallback += "\n<b>🔐 𝗔ᴄᴄᴇᴄ</b>\nOwner / Sudo: authorized bot operations."
         if update.callback_query:
             await update.callback_query.edit_message_text(
                 fallback, parse_mode=ParseMode.HTML, reply_markup=kb
@@ -632,7 +660,7 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 fallback, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb()
             )
 
-# ── /host ────────────────────────────────────────────────────────────────────
+# ── /host ────────────────────────────────────────────────────────────────
 async def host_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await remember_user(update.effective_user)
     await send_rich_message(
@@ -647,10 +675,176 @@ async def host_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return ADD_PHONE
 
 
-# ── /status ──────────────────────────────────────────────────────────────────
+# ── /addsession ───────────────────────────────────────────────────────────
+async def addsession_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Add a session directly via string session. Same flow as /host."""
+    await remember_user(update.effective_user)
 
+    if not ctx.args:
+        await send_rich_message(
+            update, ctx,
+            "<h2>🔑 ADD SESSION — STRING SESSION</h2>"
+            "<p><i>Add an account using an existing Pyrogram or Telethon string session.</i></p><hr/>"
+            "<h3>⌨️ Usage</h3>"
+            "<p><code>/addsession YOUR_STRING_SESSION</code></p>"
+            "<h3>📋 Notes</h3>"
+            "<table bordered striped>"
+            "<tr><th>FIELD</th><th>INFO</th></tr>"
+            "<tr><td>Pyrogram string</td><td>Supported ✅</td></tr>"
+            "<tr><td>Telethon string</td><td>Supported ✅</td></tr>"
+            "<tr><td>Already hosted</td><td>Rejected ❌ (same as /host)</td></tr>"
+            "</table>"
+            "<footer>⚠️ Only add sessions for accounts you own or are authorized to manage.</footer>",
+            main_menu_kb()
+        )
+        return
+
+    session_string = ctx.args[0].strip()
+    uid = update.effective_user.id
+
+    # Sending status
+    await send_rich_message(
+        update, ctx,
+        "<h2>⏳ VALIDATING SESSION…</h2>"
+        "<p>Connecting to Telegram to verify the session string.</p>",
+    )
+
+    # Try Pyrogram first
+    phone = None
+    client_type_used = None
+    try:
+        from pyrogram import Client as PyroClient
+        client = PyroClient(
+            name="verify_add_session",
+            api_id=API_ID,
+            api_hash=API_HASH,
+            session_string=session_string,
+            in_memory=True,
+            device_model="Samsung Galaxy S23",
+            system_version="Android 13",
+            app_version="10.0.1",
+            lang_code="en",
+            no_updates=True,
+        )
+        await client.start()
+        me = await client.get_me()
+        raw_phone = str(me.phone_number or me.id or "")
+        phone = ("+" + raw_phone) if raw_phone and not raw_phone.startswith("+") else raw_phone
+        await client.stop()
+        client_type_used = "pyrogram"
+    except Exception as pyro_err:
+        logging.info("Pyrogram session validation failed; trying Telethon: %s", pyro_err)
+        try:
+            from telethon import TelegramClient
+            from telethon.sessions import StringSession
+            tl_client = TelegramClient(StringSession(session_string), API_ID, API_HASH,
+                                       connection_retries=1, retry_delay=1, timeout=15)
+            await tl_client.connect()
+            if not await tl_client.is_user_authorized():
+                await tl_client.disconnect()
+                raise Exception("Telethon session not authorized")
+            me = await tl_client.get_me()
+            raw_phone = str(me.phone or me.id or "")
+            phone = ("+" + raw_phone) if raw_phone and not raw_phone.startswith("+") else raw_phone
+            await tl_client.disconnect()
+            client_type_used = "telethon"
+        except Exception as tl_err:
+            await send_rich_message(
+                update, ctx,
+                "<h2>❌ INVALID SESSION</h2>"
+                "<p>The provided string session could not be validated.</p>"
+                f"<p><code>{html.escape(str(tl_err))}</code></p>"
+                "<footer>Make sure the session string is complete and not expired.</footer>",
+                main_menu_kb()
+            )
+            return
+
+    if not phone:
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ COULD NOT RESOLVE PHONE</h2>"
+            "<p>Session is valid but phone number could not be retrieved.</p>",
+            main_menu_kb()
+        )
+        return
+
+    # Check if already hosted (same as /host flow)
+    try:
+        existing_sessions = await get_all_sessions()
+    except Exception:
+        logging.exception("Could not check whether session is already hosted")
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ DATABASE CHECK FAILED</h2>"
+            "<p>Could not verify whether this account is already hosted.</p>",
+            main_menu_kb()
+        )
+        return
+
+    for item in existing_sessions:
+        stored = str(item.get("phone", "")).strip()
+        if stored == phone or stored == phone.lstrip("+") or "+" + stored == phone:
+            await send_rich_message(
+                update, ctx,
+                "<h2>⚠️ ACCOUNT ALREADY HOSTED</h2>"
+                f"<p><code>{html.escape(phone)}</code> is already hosted in this bot.</p>"
+                "<footer>No changes were made. The existing session was left unchanged.</footer>",
+                main_menu_kb()
+            )
+            return
+
+    # Save to database
+    try:
+        await save_session(uid, phone, session_string, client_type=client_type_used)
+        await send_rich_message(
+            update, ctx,
+            "<h1>✅ SESSION ADDED</h1>"
+            f"<p><code>{html.escape(phone)}</code> has been connected successfully.</p>"
+            "<p><i>This session was added via string session — same as a hosted account.</i></p>"
+            "<footer>Your session is now active and saved in the database.</footer>",
+            main_menu_kb()
+        )
+    except Exception as e:
+        await send_rich_message(
+            update, ctx,
+            f"<h2>❌ SESSION SAVE ERROR</h2><p><code>{html.escape(str(e))}</code></p>",
+            main_menu_kb()
+        )
+
+
+# ── /stop ────────────────────────────────────────────────────────────────
+async def stop_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    user_tasks = _get_user_tasks(uid)
+    if not user_tasks:
+        await send_rich_message(
+            update, ctx,
+            "<h2>🚫 NO ACTIVE OPERATION</h2>"
+            "<p>You have no running background operation to stop.</p>"
+            "<footer>Use the 🚫 Stop Progress button on the live progress message to cancel an operation.</footer>",
+            main_menu_kb()
+        )
+        return
+    # Cancel all user tasks
+    cancelled = 0
+    for msg_id, task in user_tasks:
+        event = _get_cancel_event(uid, msg_id)
+        if event:
+            event.set()
+        if not task.done():
+            task.cancel()
+        cancelled += 1
+    await send_rich_message(
+        update, ctx,
+        f"<h2>🚫 STOP SIGNAL SENT</h2>"
+        f"<p>Cancellation requested for <b>{cancelled}</b> active operation(s).</p>"
+        "<footer>The operation(s) will stop after the current step finishes.</footer>",
+        main_menu_kb()
+    )
+
+
+# ── /status ────────────────────────────────────────────────────────────────
 def rich_text_with_custom_emojis(value: str):
-    """Build RichText parts so message-body emojis render as Telegram custom emojis."""
     parts = []
     remaining = str(value)
     emoji_items = sorted(CUSTOM_EMOJI_IDS.items(), key=lambda item: len(item[0]), reverse=True)
@@ -774,6 +968,7 @@ async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if message_id is not None:
         ctx.application.bot_data[f"status:{chat_id}:{message_id}"] = cached
 
+
 def build_refresh_summary_blocks(result: dict):
     rows = [
         ("🟢 ACTIVE", result["active"], "success", "refresh_view:active"),
@@ -819,7 +1014,6 @@ async def edit_refresh_summary(ctx, chat_id: int, message_id: int, result: dict)
                 raise RuntimeError(data.get("description", "Rich summary edit failed"))
 
 
-# ── Join result summary (blocks with ᴠɪᴇᴡ buttons) ──────────────────────────
 def build_join_summary_blocks(join_result: dict, total: int, target: str) -> list:
     rows = [
         ("✅ Joined",        join_result["joined"],  "success", "join_view:joined"),
@@ -866,7 +1060,6 @@ async def edit_join_summary(ctx, chat_id: int, message_id: int,
                 raise RuntimeError(data.get("description", "Join summary edit failed"))
 
 
-# ── Report result summary (blocks with ᴠɪᴇᴡ buttons) ────────────────────────
 def build_report_summary_blocks(result: dict, target: str, total_ids: int, count: int) -> list:
     rows = [
         ("✅ Success",    result["success"],    "success", "report_view:success"),
@@ -921,7 +1114,6 @@ async def edit_report_summary(ctx, chat_id: int, message_id: int,
                 raise RuntimeError(data.get("description", "Report summary edit failed"))
 
 
-# ── Leave result summary (blocks with ᴠɪᴇᴡ buttons) ─────────────────────────
 def build_leave_summary_blocks(leave_result: dict, total: int, target: str) -> list:
     rows = [
         ("🟢 Leaved",        leave_result["leaved"],    "success", "leave_view:leaved"),
@@ -968,15 +1160,15 @@ async def edit_leave_summary(ctx, chat_id: int, message_id: int,
                 raise RuntimeError(data.get("description", "Leave summary edit failed"))
 
 
-# ── /refresh ─────────────────────────────────────────────────────────────────
-async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not await require_access(update, ctx):
-        return
-
-    chat_id = update.effective_chat.id
+# ── Background task: Refresh ────────────────────────────────────────────────
+async def _run_refresh_task(
+    ctx: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    uid: int,
+    msg_id: int,
+    cancel_event: asyncio.Event,
+):
     api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
-    progress_message = update.callback_query.message if update.callback_query else None
-    progress_message_id = progress_message.message_id if progress_message else None
     progress_lines = []
 
     def build_progress_html(index: int, total: int, latest: list, finished: bool = False):
@@ -1001,30 +1193,30 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "<footer>🔐 Account numbers are masked for privacy</footer>"
         )
 
-    async def publish_progress(html_content: str, fallback_text: str = "", initial: bool = False):
-        nonlocal progress_message_id, progress_message
+    async def publish_progress(html_content: str, with_stop_btn: bool = True):
         rich_html = apply_custom_emojis(html_content)
-        method = "sendRichMessage" if progress_message_id is None else "editMessageText"
         payload = {
             "chat_id": chat_id,
+            "message_id": msg_id,
             "rich_message": {"html": rich_html},
         }
-        if progress_message_id is not None:
-            payload["message_id"] = progress_message_id
+        # Show stop button only while running
+        if with_stop_btn:
+            payload["reply_markup"] = stop_progress_kb(uid, msg_id).to_dict()
         try:
             timeout = aiohttp.ClientTimeout(total=15)
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(api_base + method, json=payload) as response:
+                async with session.post(api_base + "editMessageText", json=payload) as response:
                     result = await response.json(content_type=None)
                     if not response.ok or not result.get("ok"):
-                        raise RuntimeError(result.get("description", "Rich refresh progress update failed"))
-                    if method == "sendRichMessage":
-                        progress_message_id = result["result"]["message_id"]
-            return
+                        raise RuntimeError(result.get("description", "Refresh progress update failed"))
         except Exception as exc:
-            logging.warning("Rich refresh progress update failed; no normal-message fallback was sent: %s", exc)
+            logging.warning("Refresh progress update failed: %s", exc)
 
     async def report_progress(index: int, total: int, phone: str, status: str):
+        # Check cancellation
+        if cancel_event.is_set():
+            raise asyncio.CancelledError("User requested stop")
         icon, label = {
             "active": ("🟢", "ACTIVE"),
             "expired": ("🔴", "EXPIRED"),
@@ -1035,19 +1227,29 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         progress_lines.append((icon, html.escape(masked_phone), label))
         visible_lines = progress_lines[-6:]
         panel = build_progress_html(index, total, visible_lines)
-        fallback = (
-            f"⭐ SESSION REFRESH\n📊 Progress: {index}/{total}\n\n"
-            + "\n".join(f"{row[0]} {row[1]} — {row[2]}" for row in visible_lines)
+        await publish_progress(panel, with_stop_btn=True)
+
+    stopped = False
+    try:
+        result = await refresh_all_sessions(on_progress=report_progress)
+    except asyncio.CancelledError:
+        stopped = True
+        result = {"active": 0, "expired": 0, "errors": 0, "checked": 0,
+                  "active_ids": [], "expired_ids": [], "error_ids": [], "checked_ids": []}
+    finally:
+        _unregister_task(uid, msg_id)
+
+    if stopped:
+        await _rich_edit_by_id(
+            ctx, chat_id, msg_id,
+            "<h2>🚫 SESSION REFRESH STOPPED</h2>"
+            "<p><i>The refresh operation was cancelled by user request.</i></p>",
+            main_menu_kb(),
+            "🚫 Session refresh was stopped.",
+            main_menu_kb()
         )
-        await publish_progress(panel, fallback)
+        return
 
-    await publish_progress(
-        build_progress_html(0, 0, []),
-        "🔄 SESSION REFRESH\nPreparing session checks…",
-        initial=True,
-    )
-
-    result = await refresh_all_sessions(on_progress=report_progress)
     final_html = (
         "<h1>⭐ SESSION REFRESH COMPLETE</h1>"
         "<p><i>All available session checks have finished.</i></p><hr/>"
@@ -1059,40 +1261,556 @@ async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "</table>"
         "<footer>🔐 Account numbers were kept private during verification</footer>"
     )
-    final_text = (
-        "⭐ SESSION REFRESH COMPLETE\\n\\n"
-        f"🟢 ACTIVE: {result['active']}\\n"
-        f"🔴 EXPIRED: {result['expired']}\\n"
-        f"⚠️ ERRORS: {result['errors']}\\n"
-        f"🎁 CHECKED: {result['checked']}"
-    )
-    if progress_message_id is not None:
-        ctx.application.bot_data[f"refresh:{chat_id}:{progress_message_id}"] = {
-            "owner_id": update.effective_user.id,
-            "active": result.get("active_ids", []),
-            "expired": result.get("expired_ids", []),
-            "errors": result.get("error_ids", []),
-            "checked": result.get("checked_ids", []),
-            "counts": {k: result[k] for k in ("active", "expired", "errors", "checked")},
-        }
+
+    ctx.application.bot_data[f"refresh:{chat_id}:{msg_id}"] = {
+        "owner_id": uid,
+        "active": result.get("active_ids", []),
+        "expired": result.get("expired_ids", []),
+        "errors": result.get("error_ids", []),
+        "checked": result.get("checked_ids", []),
+        "counts": {k: result[k] for k in ("active", "expired", "errors", "checked")},
+    }
+    # Update message WITHOUT stop button
     try:
-        if progress_message_id is None:
-            raise RuntimeError("Refresh message ID unavailable")
-        await edit_refresh_summary(ctx, chat_id, progress_message_id, result)
+        await edit_refresh_summary(ctx, chat_id, msg_id, result)
     except Exception as exc:
         logging.debug("Rich refresh summary unavailable; using fallback: %s", exc)
-        if progress_message_id is not None:
-            try:
-                await ctx.bot.edit_message_text(
-                    chat_id=chat_id, message_id=progress_message_id,
-                    text=final_text, reply_markup=refresh_view_kb()
-                )
-            except Exception:
-                await send_rich_message(update, ctx, final_html, refresh_view_kb(), edit=bool(update.callback_query))
-        else:
-            await send_rich_message(update, ctx, final_html, refresh_view_kb())
+        final_text = (
+            "⭐ SESSION REFRESH COMPLETE\n\n"
+            f"🟢 ACTIVE: {result['active']}\n"
+            f"🔴 EXPIRED: {result['expired']}\n"
+            f"⚠️ ERRORS: {result['errors']}\n"
+            f"🎁 CHECKED: {result['checked']}"
+        )
+        try:
+            await ctx.bot.edit_message_text(
+                chat_id=chat_id, message_id=msg_id,
+                text=final_text, reply_markup=refresh_view_kb()
+            )
+        except Exception:
+            pass
 
-# ── /session ─────────────────────────────────────────────────────────────────
+
+# ── /refresh ────────────────────────────────────────────────────────────────
+async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await require_access(update, ctx):
+        return
+
+    uid = update.effective_user.id
+    chat_id = update.effective_chat.id
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+
+    # Send initial progress message with stop button placeholder
+    initial_html = (
+        "<h1>⭐ SESSION REFRESH</h1>"
+        "<p><i>Verifying connected sessions…</i></p><hr/>"
+        "<table bordered striped>"
+        "<tr><th>STATUS</th><th>ACCOUNT</th><th>RESULT</th></tr>"
+        "<tr><td>🔄</td><td colspan=\"2\">Preparing checks…</td></tr>"
+        "</table>"
+        "<footer>🔐 Account numbers are masked for privacy</footer>"
+    )
+
+    # Edit existing message if from callback, else send new
+    if update.callback_query and update.callback_query.message:
+        msg_id = update.callback_query.message.message_id
+        payload = {
+            "chat_id": chat_id,
+            "message_id": msg_id,
+            "rich_message": {"html": apply_custom_emojis(initial_html)},
+            "reply_markup": stop_progress_kb(uid, msg_id).to_dict(),
+        }
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(api_base + "editMessageText", json=payload) as response:
+                    result = await response.json(content_type=None)
+                    if not response.ok or not result.get("ok"):
+                        raise RuntimeError(result.get("description"))
+        except Exception as exc:
+            logging.warning("Could not set initial refresh message: %s", exc)
+    else:
+        # New message
+        msg_id = await _rich_send_new(
+            ctx, chat_id, initial_html,
+            stop_progress_kb(uid, 0),  # temp placeholder, will update after we have msg_id
+            fallback_text="🔄 SESSION REFRESH\nPreparing session checks…"
+        )
+        if msg_id:
+            # Update with correct stop button
+            payload = {
+                "chat_id": chat_id,
+                "message_id": msg_id,
+                "reply_markup": stop_progress_kb(uid, msg_id).to_dict(),
+            }
+            try:
+                timeout = aiohttp.ClientTimeout(total=10)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    await session.post(api_base + "editMessageReplyMarkup", json=payload)
+            except Exception:
+                pass
+
+    if not msg_id:
+        return
+
+    # Fire background task
+    cancel_event = asyncio.Event()
+    task = asyncio.create_task(
+        _run_refresh_task(ctx, chat_id, uid, msg_id, cancel_event)
+    )
+    _register_task(uid, msg_id, task, cancel_event)
+
+
+# ── Background task: Join ────────────────────────────────────────────────
+async def _run_join_task(
+    ctx: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    uid: int,
+    msg_id: int,
+    target: str,
+    sessions: list,
+    cancel_event: asyncio.Event,
+):
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    total = len(sessions)
+    last = {"t": 0}
+    stopped = False
+
+    async def cb(r):
+        if cancel_event.is_set():
+            raise asyncio.CancelledError("User requested stop")
+        now = time.time()
+        done = r["joined"] + r["already"] + r["failed"]
+        if now - last["t"] >= 1 or done >= total:
+            last["t"] = now
+            progress_html = (
+                "<h2>⏳ JOIN IN PROGRESS</h2>"
+                f"<p><i>Target: <code>{html.escape(target)}</code></i></p><hr/>"
+                "<table bordered striped>"
+                "<tr><th>RESULT</th><th>COUNT</th></tr>"
+                f"<tr><td>✅ Joined</td><td><b>{r['joined']}</b></td></tr>"
+                f"<tr><td>🔄 Already Member</td><td><b>{r['already']}</b></td></tr>"
+                f"<tr><td>❌ Failed</td><td><b>{r['failed']}</b></td></tr>"
+                f"<tr><td>📊 Done</td><td><b>{done} / {total}</b></td></tr>"
+                "</table>"
+                "<footer>Join operation is running…</footer>"
+            )
+            payload = {
+                "chat_id": chat_id,
+                "message_id": msg_id,
+                "rich_message": {"html": apply_custom_emojis(progress_html)},
+                "reply_markup": stop_progress_kb(uid, msg_id).to_dict(),
+            }
+            try:
+                timeout = aiohttp.ClientTimeout(total=15)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(api_base + "editMessageText", json=payload) as response:
+                        result = await response.json(content_type=None)
+                        if not response.ok or not result.get("ok"):
+                            raise RuntimeError(result.get("description"))
+            except Exception as exc:
+                logging.warning("Join progress update failed: %s", exc)
+
+    try:
+        join_result = await mass_join(sessions, target, progress_cb=cb)
+    except asyncio.CancelledError:
+        stopped = True
+        join_result = {"joined": 0, "already": 0, "failed": 0, "joined_ids": [], "already_ids": [], "failed_ids_arr": []}
+    finally:
+        _unregister_task(uid, msg_id)
+
+    if stopped:
+        await _rich_edit_by_id(
+            ctx, chat_id, msg_id,
+            "<h2>🚫 JOIN STOPPED</h2><p>The join operation was cancelled.</p>",
+            main_menu_kb(), "🚫 Join stopped.", main_menu_kb()
+        )
+        return
+
+    all_phones = [s.get("phone", "?") for s in sessions]
+    ctx.application.bot_data[f"join:{chat_id}:{msg_id}"] = {
+        "owner_id": uid, "target": target, "total": total,
+        "counts": {k: join_result[k] for k in ("joined", "already", "failed")},
+        "joined": join_result.get("joined_ids", []),
+        "already": join_result.get("already_ids", []),
+        "failed": join_result.get("failed_ids_arr", []),
+        "total_list": all_phones,
+    }
+    try:
+        await edit_join_summary(ctx, chat_id, msg_id, join_result, total, target)
+    except Exception as exc:
+        logging.debug("Rich join summary unavailable; using fallback: %s", exc)
+        rich_done = (
+            "<h1>✅ JOIN COMPLETE</h1>"
+            f"<p><i>All accounts processed for <code>{html.escape(target)}</code></i></p><hr/>"
+            "<table bordered striped>"
+            "<tr><th>RESULT</th><th>COUNT</th></tr>"
+            f"<tr><td>✅ Joined</td><td><b>{join_result['joined']}</b></td></tr>"
+            f"<tr><td>🔄 Already Member</td><td><b>{join_result['already']}</b></td></tr>"
+            f"<tr><td>❌ Failed</td><td><b>{join_result['failed']}</b></td></tr>"
+            f"<tr><td>👥 Total Accounts</td><td><b>{total}</b></td></tr>"
+            "</table><footer>Join operation finished.</footer>"
+        )
+        await _rich_edit_by_id(
+            ctx, chat_id, msg_id,
+            rich_done, main_menu_kb(),
+            f"✅ Join done | 📦 {total} | ✅ {join_result['joined']} | ❌ {join_result['failed']}",
+            main_menu_kb()
+        )
+
+
+# ── /join ────────────────────────────────────────────────────────────────
+async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await require_access(update, ctx):
+        return
+    if not ctx.args:
+        await send_rich_message(
+            update, ctx,
+            "<h1>👥 JOIN CHAT</h1>"
+            "<p><i>Join a group or channel with your authorized connected accounts.</i></p><hr/>"
+            "<h2>🎯 SUPPORTED TARGET FORMATS</h2>"
+            "<table bordered striped>"
+            "<tr><th>TYPE</th><th>FORMAT</th></tr>"
+            "<tr><td>Username</td><td><code>@groupusername</code></td></tr>"
+            "<tr><td>Public link</td><td><code>https://t.me/groupusername</code></td></tr>"
+            "<tr><td>Invite link</td><td><code>https://t.me/+INVITE_CODE</code></td></tr>"
+            "<tr><td>Chat ID</td><td><code>-1001234567890</code></td></tr>"
+            "</table>"
+            "<h3>⌨️ EXAMPLES</h3>"
+            "<p><code>/join @groupusername</code></p>"
+            "<p><code>/join https://t.me/+ABC123</code></p>"
+            "<p><code>/join -1001234567890</code></p>"
+            "<footer>Use only accounts you own or are explicitly authorized to manage.</footer>",
+            main_menu_kb()
+        )
+        return
+
+    target = ctx.args[0]
+    uid = update.effective_user.id
+    chat_id = update.effective_chat.id
+    sessions = await get_all_sessions()
+    if not sessions:
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ NO ACTIVE SESSIONS</h2>"
+            "<p>Add accounts first before using the join command.</p>",
+            main_menu_kb()
+        )
+        return
+
+    total = len(sessions)
+    join_initial_rich = (
+        "<h2>⏳ JOIN IN PROGRESS</h2>"
+        f"<p><i>Target: <code>{html.escape(target)}</code></i></p><hr/>"
+        "<table bordered striped>"
+        "<tr><th>RESULT</th><th>COUNT</th></tr>"
+        "<tr><td>✅ Joined</td><td><b>0</b></td></tr>"
+        "<tr><td>🔄 Already</td><td><b>0</b></td></tr>"
+        "<tr><td>❌ Failed</td><td><b>0</b></td></tr>"
+        f"<tr><td>📊 Done</td><td><b>0 / {total}</b></td></tr>"
+        "</table>"
+    )
+    msg_id = await _rich_send_new(
+        ctx, chat_id, join_initial_rich,
+        stop_progress_kb(uid, 0),  # temp, updated below
+        f"⏳ Joining {html.escape(target)}…"
+    )
+    if msg_id:
+        api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+        payload = {"chat_id": chat_id, "message_id": msg_id,
+                   "reply_markup": stop_progress_kb(uid, msg_id).to_dict()}
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                await session.post(api_base + "editMessageReplyMarkup", json=payload)
+        except Exception:
+            pass
+
+    cancel_event = asyncio.Event()
+    task = asyncio.create_task(
+        _run_join_task(ctx, chat_id, uid, msg_id, target, sessions, cancel_event)
+    )
+    _register_task(uid, msg_id, task, cancel_event)
+
+
+# ── Background task: Leave ────────────────────────────────────────────────
+async def _run_leave_task(
+    ctx: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    uid: int,
+    msg_id: int,
+    target: str,
+    sessions: list,
+    cancel_event: asyncio.Event,
+):
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    total = len(sessions)
+    last = {"t": 0}
+    stopped = False
+
+    async def cb(r):
+        if cancel_event.is_set():
+            raise asyncio.CancelledError("User requested stop")
+        now = time.time()
+        done = r["leaved"] + r["no_member"] + r["failed"]
+        if now - last["t"] >= 1 or done >= total:
+            last["t"] = now
+            progress_html = (
+                "<h2>⏳ LEAVE IN PROGRESS</h2>"
+                f"<p><i>Target: <code>{html.escape(target)}</code></i></p><hr/>"
+                "<table bordered striped>"
+                "<tr><th>RESULT</th><th>COUNT</th></tr>"
+                f"<tr><td>🟢 Leaved</td><td><b>{r['leaved']}</b></td></tr>"
+                f"<tr><td>🟡 No Member</td><td><b>{r['no_member']}</b></td></tr>"
+                f"<tr><td>🔴 Failed</td><td><b>{r['failed']}</b></td></tr>"
+                f"<tr><td>📊 Done</td><td><b>{done} / {total}</b></td></tr>"
+                "</table>"
+                "<footer>Leave operation is running…</footer>"
+            )
+            payload = {
+                "chat_id": chat_id,
+                "message_id": msg_id,
+                "rich_message": {"html": apply_custom_emojis(progress_html)},
+                "reply_markup": stop_progress_kb(uid, msg_id).to_dict(),
+            }
+            try:
+                timeout = aiohttp.ClientTimeout(total=15)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(api_base + "editMessageText", json=payload) as response:
+                        result = await response.json(content_type=None)
+                        if not response.ok or not result.get("ok"):
+                            raise RuntimeError(result.get("description"))
+            except Exception as exc:
+                logging.warning("Leave progress update failed: %s", exc)
+
+    try:
+        leave_result = await mass_leave(sessions, target, progress_cb=cb)
+    except asyncio.CancelledError:
+        stopped = True
+        leave_result = {"leaved": 0, "no_member": 0, "failed": 0, "leaved_ids": [], "no_member_ids": [], "failed_ids": []}
+    finally:
+        _unregister_task(uid, msg_id)
+
+    if stopped:
+        await _rich_edit_by_id(
+            ctx, chat_id, msg_id,
+            "<h2>🚫 LEAVE STOPPED</h2><p>The leave operation was cancelled.</p>",
+            main_menu_kb(), "🚫 Leave stopped.", main_menu_kb()
+        )
+        return
+
+    all_phones = [s.get("phone", "?") for s in sessions]
+    ctx.application.bot_data[f"leave:{chat_id}:{msg_id}"] = {
+        "owner_id": uid, "target": target, "total": total,
+        "counts": {k: leave_result[k] for k in ("leaved", "no_member", "failed")},
+        "leaved": leave_result.get("leaved_ids", []),
+        "no_member": leave_result.get("no_member_ids", []),
+        "failed": leave_result.get("failed_ids", []),
+        "total_list": all_phones,
+    }
+    try:
+        await edit_leave_summary(ctx, chat_id, msg_id, leave_result, total, target)
+    except Exception as exc:
+        logging.debug("Rich leave summary unavailable; using fallback: %s", exc)
+        rich_done = (
+            "<h1>🚪 LEAVE COMPLETE</h1>"
+            f"<p><i>All accounts processed for <code>{html.escape(target)}</code></i></p><hr/>"
+            "<table bordered striped>"
+            "<tr><th>RESULT</th><th>COUNT</th></tr>"
+            f"<tr><td>🟢 Leaved</td><td><b>{leave_result['leaved']}</b></td></tr>"
+            f"<tr><td>🟡 No Member</td><td><b>{leave_result['no_member']}</b></td></tr>"
+            f"<tr><td>🔴 Failed</td><td><b>{leave_result['failed']}</b></td></tr>"
+            f"<tr><td>📦 Total Accounts</td><td><b>{total}</b></td></tr>"
+            "</table><footer>Leave operation finished.</footer>"
+        )
+        await _rich_edit_by_id(
+            ctx, chat_id, msg_id,
+            rich_done, main_menu_kb(),
+            f"🚪 Leave done | 📦 {total} | 🟢 {leave_result['leaved']} | 🔴 {leave_result['failed']}",
+            main_menu_kb()
+        )
+
+
+# ── /leave ────────────────────────────────────────────────────────────────
+async def leave_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await require_access(update, ctx):
+        return
+    if not ctx.args:
+        await send_rich_message(
+            update, ctx,
+            "<h2>🚪 LEAVE CHAT</h2>"
+            "<p>Leave a group or channel with all authorized accounts.</p><hr/>"
+            "<h3>🎯 Supported Target Formats</h3>"
+            "<table bordered striped>"
+            "<tr><th>TYPE</th><th>FORMAT</th></tr>"
+            "<tr><td>Username</td><td><code>@groupusername</code></td></tr>"
+            "<tr><td>Public link</td><td><code>https://t.me/groupusername</code></td></tr>"
+            "<tr><td>Invite link</td><td><code>https://t.me/+INVITE_CODE</code></td></tr>"
+            "<tr><td>Chat ID</td><td><code>-1001234567890</code></td></tr>"
+            "</table>"
+            "<p>Examples:</p>"
+            "<p><code>/leave @groupusername</code></p>"
+            "<p><code>/leave https://t.me/+ABC123</code></p>"
+            "<p><code>/leave -1001234567890</code></p>",
+            main_menu_kb()
+        )
+        return
+
+    target = ctx.args[0]
+    uid = update.effective_user.id
+    chat_id = update.effective_chat.id
+    sessions = await get_all_sessions()
+    if not sessions:
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ NO ACTIVE SESSIONS</h2>"
+            "<p>Add accounts first before using the leave command.</p>",
+            main_menu_kb()
+        )
+        return
+
+    total = len(sessions)
+    leave_initial_rich = (
+        "<h2>⏳ LEAVE IN PROGRESS</h2>"
+        f"<p><i>Target: <code>{html.escape(target)}</code></i></p><hr/>"
+        "<table bordered striped>"
+        "<tr><th>RESULT</th><th>COUNT</th></tr>"
+        "<tr><td>🟢 Leaved</td><td><b>0</b></td></tr>"
+        "<tr><td>🟡 No Member</td><td><b>0</b></td></tr>"
+        "<tr><td>🔴 Failed</td><td><b>0</b></td></tr>"
+        f"<tr><td>📊 Done</td><td><b>0 / {total}</b></td></tr>"
+        "</table>"
+    )
+    msg_id = await _rich_send_new(
+        ctx, chat_id, leave_initial_rich,
+        stop_progress_kb(uid, 0),  # temp
+        f"⏳ Leaving {html.escape(target)}…"
+    )
+    if msg_id:
+        api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+        payload = {"chat_id": chat_id, "message_id": msg_id,
+                   "reply_markup": stop_progress_kb(uid, msg_id).to_dict()}
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                await session.post(api_base + "editMessageReplyMarkup", json=payload)
+        except Exception:
+            pass
+
+    cancel_event = asyncio.Event()
+    task = asyncio.create_task(
+        _run_leave_task(ctx, chat_id, uid, msg_id, target, sessions, cancel_event)
+    )
+    _register_task(uid, msg_id, task, cancel_event)
+
+
+# ── Background task: Report ────────────────────────────────────────────────
+async def _run_report_task(
+    ctx: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    uid: int,
+    msg_id: int,
+    sessions: list,
+    target: str,
+    reason: str,
+    count: int,
+    report_message: str,
+    cancel_event: asyncio.Event,
+):
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    total_ids = len(sessions)
+    total_expected = total_ids * count
+    last = {"t": 0}
+    stopped = False
+
+    async def cb(r):
+        if cancel_event.is_set():
+            raise asyncio.CancelledError("User requested stop")
+        now = time.time()
+        done = r["success"] + r["failed"] + r["expired"]
+        if now - last["t"] >= 1 or done >= total_expected:
+            last["t"] = now
+            progress_html = (
+                "<h2>📡 REPORTING IN PROGRESS</h2>"
+                f"<p><i>Target: <code>{html.escape(target)}</code></i></p><hr/>"
+                "<table bordered striped>"
+                "<tr><th>RESULT</th><th>COUNT</th></tr>"
+                f"<tr><td>✅ Success</td><td><b>{r['success']}</b></td></tr>"
+                f"<tr><td>❌ Failed</td><td><b>{r['failed']}</b></td></tr>"
+                f"<tr><td>🔴 Expired</td><td><b>{r['expired']}</b></td></tr>"
+                f"<tr><td>📊 Done</td><td><b>{done} / {total_expected}</b></td></tr>"
+                "</table>"
+                "<footer>Report operation is running…</footer>"
+            )
+            payload = {
+                "chat_id": chat_id,
+                "message_id": msg_id,
+                "rich_message": {"html": apply_custom_emojis(progress_html)},
+                "reply_markup": stop_progress_kb(uid, msg_id).to_dict(),
+            }
+            try:
+                timeout = aiohttp.ClientTimeout(total=15)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(api_base + "editMessageText", json=payload) as response:
+                        result = await response.json(content_type=None)
+                        if not response.ok or not result.get("ok"):
+                            raise RuntimeError(result.get("description"))
+            except Exception as exc:
+                logging.warning("Report progress update failed: %s", exc)
+
+    try:
+        result = await mass_report(
+            sessions, target, reason, count, report_message, progress_cb=cb
+        )
+    except asyncio.CancelledError:
+        stopped = True
+        result = {"success": 0, "failed": 0, "expired": 0, "errors": [],
+                  "success_ids": [], "failed_ids_arr": [], "expired_ids_arr": []}
+    finally:
+        _unregister_task(uid, msg_id)
+
+    if stopped:
+        await _rich_edit_by_id(
+            ctx, chat_id, msg_id,
+            "<h2>🚫 REPORT STOPPED</h2><p>The report operation was cancelled.</p>",
+            main_menu_kb(), "🚫 Report stopped.", main_menu_kb()
+        )
+        return
+
+    all_phones = [s.get("phone", "?") for s in sessions]
+    ctx.application.bot_data[f"report:{chat_id}:{msg_id}"] = {
+        "owner_id": uid, "target": target, "count": count, "total_ids": total_ids,
+        "counts": {k: result[k] for k in ("success", "failed", "expired")},
+        "success": result.get("success_ids", []),
+        "failed": result.get("failed_ids_arr", []),
+        "expired": result.get("expired_ids_arr", []),
+        "total_list": all_phones,
+    }
+    try:
+        await edit_report_summary(ctx, chat_id, msg_id, result, target, total_ids, count)
+    except Exception as exc:
+        logging.debug("Rich report summary unavailable; using fallback: %s", exc)
+        rich_done = (
+            "<h1>📊 REPORT COMPLETE</h1>"
+            "<p><i>Mass report operation finished</i></p><hr/>"
+            "<table bordered striped><tr><th>RESULT</th><th>COUNT</th></tr>"
+            f"<tr><td>🎯 Target</td><td><code>{html.escape(target)}</code></td></tr>"
+            f"<tr><td>✅ Success</td><td><b>{result['success']}</b></td></tr>"
+            f"<tr><td>❌ Failed</td><td><b>{result['failed']}</b></td></tr>"
+            f"<tr><td>🔴 Expired</td><td><b>{result['expired']}</b></td></tr>"
+            f"<tr><td>👥 Total IDs</td><td><b>{total_ids}</b></td></tr>"
+            f"<tr><td>📊 Total Reports</td><td><b>{total_ids * count}</b></td></tr></table>"
+            "<footer>Report session complete.</footer>"
+        )
+        await _rich_edit_by_id(
+            ctx, chat_id, msg_id,
+            rich_done, main_menu_kb(),
+            f"📊 Report done | ✅ {result['success']} | ❌ {result['failed']}",
+            main_menu_kb()
+        )
+
+
+# ── /session ────────────────────────────────────────────────────────────────
 async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update, ctx):
         return
@@ -1110,7 +1828,7 @@ async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
     await send_rich_message(update, ctx, rich, main_menu_kb())
 
-# ── /unhost ──────────────────────────────────────────────────────────────────
+# ── /unhost ────────────────────────────────────────────────────────────────
 async def unhost_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update, ctx):
         return
@@ -1146,9 +1864,8 @@ async def unhost_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
 
-# ── /removeexpiredid ─────────────────────────────────────────────────────────
+# ── /removeexpiredid ───────────────────────────────────────────────────────────
 async def remove_expired_id_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    # Owner and authorized sudo users may permanently remove expired IDs.
     if not await has_access(update.effective_user.id):
         await send_access_denied(update, ctx)
         return
@@ -1229,299 +1946,6 @@ async def remove_expired_id_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
 
-# ── /join ────────────────────────────────────────────────────────────────────
-async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not await require_access(update, ctx):
-        return
-    if not ctx.args:
-        await send_rich_message(
-            update, ctx,
-            "<h1>👥 JOIN CHAT</h1>"
-            "<p><i>Join a group or channel with your authorized connected accounts.</i></p><hr/>"
-            "<h2>🎯 SUPPORTED TARGET FORMATS</h2>"
-            "<table bordered striped>"
-            "<tr><th>TYPE</th><th>FORMAT</th></tr>"
-            "<tr><td>Username</td><td><code>@groupusername</code></td></tr>"
-            "<tr><td>Public link</td><td><code>https://t.me/groupusername</code></td></tr>"
-            "<tr><td>Invite link</td><td><code>https://t.me/+INVITE_CODE</code></td></tr>"
-            "<tr><td>Chat ID</td><td><code>-1001234567890</code></td></tr>"
-            "</table>"
-            "<h3>⌨️ EXAMPLES</h3>"
-            "<p><code>/join @groupusername</code></p>"
-            "<p><code>/join https://t.me/+ABC123</code></p>"
-            "<p><code>/join -1001234567890</code></p>"
-            "<footer>Use only accounts you own or are explicitly authorized to manage.</footer>",
-            main_menu_kb()
-        )
-        return
-
-    target   = ctx.args[0]
-    sessions = await get_all_sessions()
-    if not sessions:
-        await send_rich_message(
-            update, ctx,
-            "<h2>❌ NO ACTIVE SESSIONS</h2>"
-            "<p>Add accounts first before using the join command.</p>",
-            main_menu_kb()
-        )
-        return
-
-    total    = len(sessions)
-    chat_id  = update.effective_chat.id
-    join_initial_rich = (
-        "<h2>⏳ JOIN IN PROGRESS</h2>"
-        f"<p><i>Target: <code>{html.escape(target)}</code></i></p><hr/>"
-        "<table bordered striped>"
-        "<tr><th>RESULT</th><th>COUNT</th></tr>"
-        "<tr><td>✅ Joined</td><td><b>0</b></td></tr>"
-        "<tr><td>🔄 Already</td><td><b>0</b></td></tr>"
-        "<tr><td>❌ Failed</td><td><b>0</b></td></tr>"
-        f"<tr><td>📊 Done</td><td><b>0 / {total}</b></td></tr>"
-        "</table>"
-    )
-    join_initial_fallback = (
-        f"⏳ <b>Joining</b> <code>{html.escape(target)}</code>\n\n"
-        f"✅ Joined  : <code>0</code>\n"
-        f"🔄 Already : <code>0</code>\n"
-        f"❌ Failed  : <code>0</code>\n"
-        f"📊 Done    : <code>0 / {total}</code>"
-    )
-    msg_id = await _rich_send_new(
-        ctx, chat_id, join_initial_rich, None,
-        join_initial_fallback
-    )
-
-    last = {"t": 0}
-
-    async def cb(r):
-        now  = time.time()
-        done = r["joined"] + r["already"] + r["failed"]
-        if now - last["t"] >= 1 or done >= total:
-            last["t"] = now
-            progress_html = (
-                "<h2>⏳ JOIN IN PROGRESS</h2>"
-                f"<p><i>Target: <code>{html.escape(target)}</code></i></p><hr/>"
-                "<table bordered striped>"
-                "<tr><th>RESULT</th><th>COUNT</th></tr>"
-                f"<tr><td>✅ Joined</td><td><b>{r['joined']}</b></td></tr>"
-                f"<tr><td>🔄 Already Member</td><td><b>{r['already']}</b></td></tr>"
-                f"<tr><td>❌ Failed</td><td><b>{r['failed']}</b></td></tr>"
-                f"<tr><td>📊 Done</td><td><b>{done} / {total}</b></td></tr>"
-                "</table>"
-                "<footer>Join operation is running…</footer>"
-            )
-            progress_payload = {
-                "chat_id": chat_id,
-                "message_id": msg_id,
-                "rich_message": {"html": apply_custom_emojis(progress_html)},
-            }
-            try:
-                timeout = aiohttp.ClientTimeout(total=15)
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.post(
-                        f"https://api.telegram.org/bot{ctx.bot.token}/editMessageText",
-                        json=progress_payload,
-                    ) as response:
-                        result = await response.json(content_type=None)
-                        if not response.ok or not result.get("ok"):
-                            raise RuntimeError(result.get("description", "Rich join progress update failed"))
-            except Exception as exc:
-                logging.warning("Rich join progress update failed; no normal-message edit was sent: %s", exc)
-
-    join_result = await mass_join(sessions, target, progress_cb=cb)
-
-    # Store result data for ᴠɪᴇᴡ button navigation
-    all_phones = [s.get("phone", "?") for s in sessions]
-    ctx.application.bot_data[f"join:{chat_id}:{msg_id}"] = {
-        "owner_id":   update.effective_user.id,
-        "target":     target,
-        "total":      total,
-        "counts":     {k: join_result[k] for k in ("joined", "already", "failed")},
-        "joined":     join_result.get("joined_ids", []),
-        "already":    join_result.get("already_ids", []),
-        "failed":     join_result.get("failed_ids_arr", []),
-        "total_list": all_phones,
-    }
-    try:
-        await edit_join_summary(ctx, chat_id, msg_id, join_result, total, target)
-    except Exception as exc:
-        logging.debug("Rich join summary blocks unavailable; using HTML fallback: %s", exc)
-        rich_done = (
-            "<h1>✅ JOIN COMPLETE</h1>"
-            f"<p><i>All accounts processed for <code>{html.escape(target)}</code></i></p><hr/>"
-            "<table bordered striped>"
-            "<tr><th>RESULT</th><th>COUNT</th></tr>"
-            f"<tr><td>✅ Joined</td><td><b>{join_result['joined']}</b></td></tr>"
-            f"<tr><td>🔄 Already Member</td><td><b>{join_result['already']}</b></td></tr>"
-            f"<tr><td>❌ Failed</td><td><b>{join_result['failed']}</b></td></tr>"
-            f"<tr><td>👥 Total Accounts</td><td><b>{total}</b></td></tr>"
-            "</table>"
-            "<footer>Join operation finished.</footer>"
-        )
-        fallback_done = (
-            "╔══════════════════╗\n"
-            "║    ✅ JOIN DONE   ║\n"
-            "╚══════════════════╝\n\n"
-            f"🎯 Target  : <code>{html.escape(target)}</code>\n"
-            f"✅ Joined  : <code>{join_result['joined']}</code>\n"
-            f"🔄 Already : <code>{join_result['already']}</code>\n"
-            f"❌ Failed  : <code>{join_result['failed']}</code>\n"
-            f"👥 Total   : <code>{total}</code>"
-        )
-        await _rich_edit_by_id(
-            ctx, chat_id, msg_id,
-            rich_done, main_menu_kb(),
-            fallback_done, main_menu_kb()
-        )
-
-
-# ── /leave ───────────────────────────────────────────────────────────────────
-async def leave_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not await require_access(update, ctx):
-        return
-    if not ctx.args:
-        await send_rich_message(
-            update, ctx,
-            "<h2>🚪 LEAVE CHAT</h2>"
-            "<p>Leave a group or channel with all authorized accounts.</p><hr/>"
-            "<h3>🎯 Supported Target Formats</h3>"
-            "<table bordered striped>"
-            "<tr><th>TYPE</th><th>FORMAT</th></tr>"
-            "<tr><td>Username</td><td><code>@groupusername</code></td></tr>"
-            "<tr><td>Public link</td><td><code>https://t.me/groupusername</code></td></tr>"
-            "<tr><td>Invite link</td><td><code>https://t.me/+INVITE_CODE</code></td></tr>"
-            "<tr><td>Chat ID</td><td><code>-1001234567890</code></td></tr>"
-            "</table>"
-            "<p>Examples:</p>"
-            "<p><code>/leave @groupusername</code></p>"
-            "<p><code>/leave https://t.me/+ABC123</code></p>"
-            "<p><code>/leave -1001234567890</code></p>",
-            main_menu_kb()
-        )
-        return
-
-    target   = ctx.args[0]
-    sessions = await get_all_sessions()
-    if not sessions:
-        await send_rich_message(
-            update, ctx,
-            "<h2>❌ NO ACTIVE SESSIONS</h2>"
-            "<p>Add accounts first before using the leave command.</p>",
-            main_menu_kb()
-        )
-        return
-
-    total    = len(sessions)
-    chat_id  = update.effective_chat.id
-
-    leave_initial_rich = (
-        "<h2>⏳ LEAVE IN PROGRESS</h2>"
-        f"<p><i>Target: <code>{html.escape(target)}</code></i></p><hr/>"
-        "<table bordered striped>"
-        "<tr><th>RESULT</th><th>COUNT</th></tr>"
-        "<tr><td>🟢 Leaved</td><td><b>0</b></td></tr>"
-        "<tr><td>🟡 No Member</td><td><b>0</b></td></tr>"
-        "<tr><td>🔴 Failed</td><td><b>0</b></td></tr>"
-        f"<tr><td>📊 Done</td><td><b>0 / {total}</b></td></tr>"
-        "</table>"
-    )
-    leave_initial_fallback = (
-        f"⏳ <b>Leaving</b> <code>{html.escape(target)}</code>\n\n"
-        f"🟢 Leaved    : <code>0</code>\n"
-        f"🟡 No Member : <code>0</code>\n"
-        f"🔴 Failed    : <code>0</code>\n"
-        f"📊 Done      : <code>0 / {total}</code>"
-    )
-    msg_id = await _rich_send_new(
-        ctx, chat_id, leave_initial_rich, None,
-        leave_initial_fallback
-    )
-
-    last = {"t": 0}
-
-    async def cb(r):
-        now  = time.time()
-        done = r["leaved"] + r["no_member"] + r["failed"]
-        if now - last["t"] >= 1 or done >= total:
-            last["t"] = now
-            progress_html = (
-                "<h2>⏳ LEAVE IN PROGRESS</h2>"
-                f"<p><i>Target: <code>{html.escape(target)}</code></i></p><hr/>"
-                "<table bordered striped>"
-                "<tr><th>RESULT</th><th>COUNT</th></tr>"
-                f"<tr><td>🟢 Leaved</td><td><b>{r['leaved']}</b></td></tr>"
-                f"<tr><td>🟡 No Member</td><td><b>{r['no_member']}</b></td></tr>"
-                f"<tr><td>🔴 Failed</td><td><b>{r['failed']}</b></td></tr>"
-                f"<tr><td>📊 Done</td><td><b>{done} / {total}</b></td></tr>"
-                "</table>"
-                "<footer>Leave operation is running…</footer>"
-            )
-            progress_payload = {
-                "chat_id": chat_id,
-                "message_id": msg_id,
-                "rich_message": {"html": apply_custom_emojis(progress_html)},
-            }
-            try:
-                timeout = aiohttp.ClientTimeout(total=15)
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.post(
-                        f"https://api.telegram.org/bot{ctx.bot.token}/editMessageText",
-                        json=progress_payload,
-                    ) as response:
-                        result = await response.json(content_type=None)
-                        if not response.ok or not result.get("ok"):
-                            raise RuntimeError(result.get("description", "Rich leave progress update failed"))
-            except Exception as exc:
-                logging.warning("Rich leave progress update failed; no normal-message edit was sent: %s", exc)
-
-    leave_result = await mass_leave(sessions, target, progress_cb=cb)
-
-    # Store result data for ᴠɪᴇᴡ button navigation
-    all_phones = [s.get("phone", "?") for s in sessions]
-    ctx.application.bot_data[f"leave:{chat_id}:{msg_id}"] = {
-        "owner_id":    update.effective_user.id,
-        "target":      target,
-        "total":       total,
-        "counts":      {k: leave_result[k] for k in ("leaved", "no_member", "failed")},
-        "leaved":      leave_result.get("leaved_ids", []),
-        "no_member":   leave_result.get("no_member_ids", []),
-        "failed":      leave_result.get("failed_ids", []),
-        "total_list":  all_phones,
-    }
-
-    try:
-        await edit_leave_summary(ctx, chat_id, msg_id, leave_result, total, target)
-    except Exception as exc:
-        logging.debug("Rich leave summary blocks unavailable; using HTML fallback: %s", exc)
-        rich_done = (
-            "<h1>🚪 LEAVE COMPLETE</h1>"
-            f"<p><i>All accounts processed for <code>{html.escape(target)}</code></i></p><hr/>"
-            "<table bordered striped>"
-            "<tr><th>RESULT</th><th>COUNT</th></tr>"
-            f"<tr><td>🟢 Leaved</td><td><b>{leave_result['leaved']}</b></td></tr>"
-            f"<tr><td>🟡 No Member</td><td><b>{leave_result['no_member']}</b></td></tr>"
-            f"<tr><td>🔴 Failed</td><td><b>{leave_result['failed']}</b></td></tr>"
-            f"<tr><td>📦 Total Accounts</td><td><b>{total}</b></td></tr>"
-            "</table>"
-            "<footer>Leave operation finished.</footer>"
-        )
-        fallback_done = (
-            "╔══════════════════╗\n"
-            "║   🚪 LEAVE DONE   ║\n"
-            "╚══════════════════╝\n\n"
-            f"🎯 Target     : <code>{html.escape(target)}</code>\n"
-            f"🟢 Leaved     : <code>{leave_result['leaved']}</code>\n"
-            f"🟡 No Member  : <code>{leave_result['no_member']}</code>\n"
-            f"🔴 Failed     : <code>{leave_result['failed']}</code>\n"
-            f"📦 Total      : <code>{total}</code>"
-        )
-        await _rich_edit_by_id(
-            ctx, chat_id, msg_id,
-            rich_done, main_menu_kb(),
-            fallback_done, main_menu_kb()
-        )
-
-
 # ── /sudo /removesudo /sudoinfo ──────────────────────────────────────────────
 async def sudo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
@@ -1584,7 +2008,7 @@ async def sudoinfo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await send_rich_message(update, ctx, rich)
 
 
-# ── /otp (hidden) ────────────────────────────────────────────────────────────
+# ── /otp (hidden) ───────────────────────────────────────────────────────────
 async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update, ctx):
         return
@@ -1700,7 +2124,7 @@ async def otp_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
 
-# ── /cancel ──────────────────────────────────────────────────────────────────
+# ── /cancel ────────────────────────────────────────────────────────────────
 async def cancel_flow(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid  = update.effective_user.id
     data = tmp.pop(uid, None)
@@ -1722,12 +2146,39 @@ async def cancel_flow(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-# ── Button handler ───────────────────────────────────────────────────────────
+# ── Button handler ────────────────────────────────────────────────────────────────
 async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q    = update.callback_query
     data = q.data
     uid  = q.from_user.id
     await remember_user(q.from_user)
+
+    # ── Stop Progress button ───────────────────────────────────────────
+    if data.startswith("stop_progress:"):
+        await q.answer()
+        try:
+            parts = data.split(":")
+            task_uid = int(parts[1])
+            task_msg_id = int(parts[2])
+        except (IndexError, ValueError):
+            return
+
+        # Security: only the owner of the task can stop it
+        if uid != task_uid:
+            await q.answer("🚫 Not your operation.", show_alert=True)
+            return
+
+        cancel_event = _get_cancel_event(task_uid, task_msg_id)
+        if cancel_event:
+            cancel_event.set()
+
+        task = _active_tasks.get(_task_key(task_uid, task_msg_id))
+        if task and not task.done():
+            task.cancel()
+
+        await q.answer("⏹ Stop signal sent — finishing current step…")
+        return
+    # ────────────────────────────────────────────────────────────────────
 
     public = {"back", "help", "add_account", "cancel_flow", "developer"}
     if data not in public and not await has_access(uid):
@@ -1978,7 +2429,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"<p><a href=\"https://t.me/{html.escape(developer)}\">@{html.escape(developer)}</a></p>",
                 InlineKeyboardMarkup([[
                     InlineKeyboardButton(
-                        "◈ 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ◈",
+                        "◈ 𝗗𝗘𝗙𝗛𝗜𝗓𝗖𝗘𝗥 ◈",
                         url=f"https://t.me/{developer}",
                         style="danger",
                         icon_custom_emoji_id="6091123254842366873",
@@ -2086,14 +2537,15 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return ConversationHandler.END
 
-        target         = tmp[uid]["target"]
-        reason         = tmp[uid]["reason"]
-        count          = tmp[uid]["count"]
-        report_message = tmp[uid]["report_message"]
+        t              = tmp.get(uid, {})
+        target         = t.get("target", "")
+        reason         = t.get("reason", "")
+        count          = t.get("count", 1)
+        report_message = t.get("report_message", "")
         total_ids      = len(sessions)
         total_expected = total_ids * count
 
-        # Show "started" indicator on the confirm message
+        # Dismiss the confirm message
         await send_rich_message(
             update, ctx,
             "<h2>⏳ REPORTING IN PROGRESS</h2>"
@@ -2113,128 +2565,39 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"<tr><td>📊 Done</td><td><b>0 / {total_expected}</b></td></tr>"
             "</table>"
         )
-        report_initial_fallback = (
-            f"📡 <b>Reporting in progress...</b>\n\n"
-            f"✅ Success : <code>0</code>\n"
-            f"❌ Failed  : <code>0</code>\n"
-            f"🔴 Expired : <code>0</code>\n"
-            f"📊 Done    : <code>0 / {total_expected}</code>"
-        )
         sent_msg_id = await _rich_send_new(
-            ctx, report_chat_id, report_initial_rich, None,
-            report_initial_fallback
+            ctx, report_chat_id, report_initial_rich,
+            stop_progress_kb(uid, 0),  # temp
+            f"📡 Reporting in progress... 0 / {total_expected}"
         )
+        if sent_msg_id:
+            api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+            payload = {"chat_id": report_chat_id, "message_id": sent_msg_id,
+                       "reply_markup": stop_progress_kb(uid, sent_msg_id).to_dict()}
+            try:
+                timeout = aiohttp.ClientTimeout(total=10)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    await session.post(api_base + "editMessageReplyMarkup", json=payload)
+            except Exception:
+                pass
 
-        last = {"t": 0}
-
-        async def cb(r):
-            now = time.time()
-            done = r["success"] + r["failed"] + r["expired"]
-            if now - last["t"] >= 1 or done >= total_expected:
-                last["t"] = now
-                progress_html = (
-                    "<h2>📡 REPORTING IN PROGRESS</h2>"
-                    f"<p><i>Target: <code>{html.escape(target)}</code></i></p><hr/>"
-                    "<table bordered striped>"
-                    "<tr><th>RESULT</th><th>COUNT</th></tr>"
-                    f"<tr><td>✅ Success</td><td><b>{r['success']}</b></td></tr>"
-                    f"<tr><td>❌ Failed</td><td><b>{r['failed']}</b></td></tr>"
-                    f"<tr><td>🔴 Expired</td><td><b>{r['expired']}</b></td></tr>"
-                    f"<tr><td>📊 Done</td><td><b>{done} / {total_expected}</b></td></tr>"
-                    "</table>"
-                    "<footer>Report operation is running…</footer>"
-                )
-                payload = {
-                    "chat_id": report_chat_id,
-                    "message_id": sent_msg_id,
-                    "rich_message": {"html": apply_custom_emojis(progress_html)},
-                }
-                try:
-                    timeout = aiohttp.ClientTimeout(total=15)
-                    async with aiohttp.ClientSession(timeout=timeout) as session:
-                        async with session.post(
-                            f"https://api.telegram.org/bot{ctx.bot.token}/editMessageText",
-                            json=payload,
-                        ) as response:
-                            result = await response.json(content_type=None)
-                            if not response.ok or not result.get("ok"):
-                                raise RuntimeError(result.get("description", "Rich report progress update failed"))
-                except Exception as exc:
-                    logging.warning("Rich report progress update failed; no normal-message edit was sent: %s", exc)
-
-        result = await mass_report(
-            sessions, target, reason, count, report_message, progress_cb=cb
+        cancel_event = asyncio.Event()
+        task = asyncio.create_task(
+            _run_report_task(
+                ctx, report_chat_id, uid, sent_msg_id,
+                sessions, target, reason, count, report_message,
+                cancel_event
+            )
         )
+        _register_task(uid, sent_msg_id, task, cancel_event)
 
-        # Store result data for ᴠɪᴇᴡ button navigation
-        all_phones = [s.get("phone", "?") for s in sessions]
-        ctx.application.bot_data[f"report:{report_chat_id}:{sent_msg_id}"] = {
-            "owner_id":    uid,
-            "target":      target,
-            "count":       count,
-            "total_ids":   total_ids,
-            "counts":      {k: result[k] for k in ("success", "failed", "expired")},
-            "success":     result.get("success_ids", []),
-            "failed":      result.get("failed_ids_arr", []),
-            "expired":     result.get("expired_ids_arr", []),
-            "total_list":  all_phones,
-        }
-
-        try:
-            await edit_report_summary(ctx, report_chat_id, sent_msg_id,
-                                      result, target, total_ids, count)
-        except Exception as exc:
-            logging.debug("Rich report summary blocks unavailable; using HTML fallback: %s", exc)
-            rich_done = (
-                "<h1>📊 REPORT COMPLETE</h1>"
-                "<p><i>Mass report operation finished</i></p><hr/>"
-                "<table bordered striped>"
-                "<tr><th>RESULT</th><th>COUNT</th></tr>"
-                f"<tr><td>🎯 Target</td><td><code>{html.escape(target)}</code></td></tr>"
-                f"<tr><td>✅ Success</td><td><b>{result['success']}</b></td></tr>"
-                f"<tr><td>❌ Failed</td><td><b>{result['failed']}</b></td></tr>"
-                f"<tr><td>🔴 Expired</td><td><b>{result['expired']}</b></td></tr>"
-                f"<tr><td>👥 Total IDs</td><td><b>{total_ids}</b></td></tr>"
-                f"<tr><td>📊 Total Reports</td><td><b>{total_ids * count}</b></td></tr>"
-                "</table>"
-            )
-            if result.get("errors"):
-                unique = list(set(result["errors"]))[:5]
-                rich_done += (
-                    "<h3>⚠️ ERRORS</h3>"
-                    + "".join(f"<p><code>{html.escape(e)}</code></p>" for e in unique)
-                )
-            rich_done += "<footer>Report session complete.</footer>"
-            err_line = ""
-            if result.get("errors"):
-                unique   = list(set(result["errors"]))[:5]
-                err_line = "\n\n⚠️ <b>Errors:</b>\n" + "\n".join(
-                    f"• <code>{html.escape(e)}</code>" for e in unique
-                )
-            fallback_done = (
-                "╔══════════════════╗\n"
-                "║   📊 REPORT DONE  ║\n"
-                "╚══════════════════╝\n\n"
-                f"🎯 Target   : <code>{html.escape(target)}</code>\n"
-                f"✅ Success  : <code>{result['success']}</code>\n"
-                f"❌ Failed   : <code>{result['failed']}</code>\n"
-                f"🔴 Expired  : <code>{result['expired']}</code>\n"
-                f"👥 Total IDs: <code>{total_ids}</code>\n"
-                f"📊 Total    : <code>{total_ids * count}</code>"
-                f"{err_line}"
-            )
-            await _rich_edit_by_id(
-                ctx, report_chat_id, sent_msg_id,
-                rich_done, main_menu_kb(),
-                fallback_done, main_menu_kb()
-            )
         tmp.pop(uid, None)
         return ConversationHandler.END
 
     return None
 
 
-# ── Account add flow (Pyrogram + Official Android credentials) ───────────────
+# ── Account add flow ─────────────────────────────────────────────────────────────
 async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid   = update.effective_user.id
     phone = update.message.text.strip()
@@ -2249,7 +2612,6 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return ADD_PHONE
 
-    # Prevent requesting OTP or replacing an already-hosted active session.
     try:
         existing_sessions = await get_all_sessions()
     except Exception:
@@ -2276,8 +2638,6 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         from pyrogram import Client
 
-        # Official Telegram Android app credentials
-        # Telegram trusts these even from datacenter IPs — OTP delivery works for all countries
         OFFICIAL_API_ID   = 6
         OFFICIAL_API_HASH = "eb06d4abfb49dc3eeb1aeb98ae0f581e"
 
@@ -2399,7 +2759,7 @@ async def recv_2fa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-# ── Report flow ──────────────────────────────────────────────────────────────
+# ── Report flow ─────────────────────────────────────────────────────────────
 async def recv_target(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid    = update.effective_user.id
     target = update.message.text.strip()
@@ -2472,7 +2832,7 @@ async def recv_count(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return CONFIRM_REPORT
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+# ── Main ────────────────────────────────────────────────────────────────
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -2501,39 +2861,43 @@ def main():
         allow_reentry=True,
     )
 
-    app.add_handler(CommandHandler("start",      start))
-    app.add_handler(CommandHandler("status",     status_cmd))
-    app.add_handler(CommandHandler("refresh",    refresh_cmd))
-    app.add_handler(CommandHandler("session",    session_cmd))
-    app.add_handler(CommandHandler("unhost",     unhost_cmd))
-    app.add_handler(CommandHandler("removeexpiredid", remove_expired_id_cmd))
-    app.add_handler(CommandHandler("help",       help_cmd))
-    app.add_handler(CommandHandler("join",       join_cmd))
-    app.add_handler(CommandHandler("leave",      leave_cmd))
-    app.add_handler(CommandHandler("sudo",       sudo_cmd))
-    app.add_handler(CommandHandler("removesudo", removesudo_cmd))
-    app.add_handler(CommandHandler("sudoinfo",   sudoinfo_cmd))
-    app.add_handler(CommandHandler("otp",        otp_cmd))  # hidden
+    app.add_handler(CommandHandler("start",          start))
+    app.add_handler(CommandHandler("status",         status_cmd))
+    app.add_handler(CommandHandler("refresh",        refresh_cmd))
+    app.add_handler(CommandHandler("session",        session_cmd))
+    app.add_handler(CommandHandler("unhost",         unhost_cmd))
+    app.add_handler(CommandHandler("removeexpiredid",remove_expired_id_cmd))
+    app.add_handler(CommandHandler("help",           help_cmd))
+    app.add_handler(CommandHandler("join",           join_cmd))
+    app.add_handler(CommandHandler("leave",          leave_cmd))
+    app.add_handler(CommandHandler("sudo",           sudo_cmd))
+    app.add_handler(CommandHandler("removesudo",     removesudo_cmd))
+    app.add_handler(CommandHandler("sudoinfo",       sudoinfo_cmd))
+    app.add_handler(CommandHandler("otp",            otp_cmd))
+    app.add_handler(CommandHandler("addsession",     addsession_cmd))
+    app.add_handler(CommandHandler("stop",           stop_cmd))
     app.add_handler(conv)
-    app.add_handler(CommandHandler("cancel",     cancel_flow))
+    app.add_handler(CommandHandler("cancel",         cancel_flow))
     app.add_handler(CallbackQueryHandler(button_handler))
 
     async def on_startup(app):
         await fetch_proxies()
         asyncio.create_task(rotate_forever())
         await app.bot.set_my_commands([
-            BotCommand("start",      "Main menu"),
-            BotCommand("host",       "Add a Telegram account"),
-            BotCommand("status",     "Session statistics"),
-            BotCommand("refresh",    "Verify all sessions"),
-            BotCommand("session",    "List your sessions"),
-            BotCommand("unhost",     "Remove a session by phone"),
+            BotCommand("start",           "Main menu"),
+            BotCommand("host",            "Add a Telegram account"),
+            BotCommand("addsession",      "Add account via string session"),
+            BotCommand("status",          "Session statistics"),
+            BotCommand("refresh",         "Verify all sessions"),
+            BotCommand("session",         "List your sessions"),
+            BotCommand("unhost",          "Remove a session by phone"),
             BotCommand("removeexpiredid", "Permanently remove an expired ID"),
-            BotCommand("join",       "Join with all accounts"),
-            BotCommand("leave",      "Leave a chat with all accounts"),
-            BotCommand("sudoinfo",   "Access directory"),
-            BotCommand("cancel",     "Cancel current flow"),
-            BotCommand("help",       "All commands"),
+            BotCommand("join",            "Join with all accounts"),
+            BotCommand("leave",           "Leave a chat with all accounts"),
+            BotCommand("stop",            "Stop your running background operation"),
+            BotCommand("sudoinfo",        "Access directory"),
+            BotCommand("cancel",          "Cancel current flow"),
+            BotCommand("help",            "All commands"),
         ])
 
     app.post_init = on_startup
