@@ -969,7 +969,7 @@ async def edit_leave_summary(ctx, chat_id: int, message_id: int,
 
 
 # ── /refresh ─────────────────────────────────────────────────────────────────
-async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+async def _refresh_cmd_background(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update, ctx):
         return
 
@@ -1230,7 +1230,7 @@ async def remove_expired_id_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ── /join ────────────────────────────────────────────────────────────────────
-async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+async def _join_cmd_background(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update, ctx):
         return
     if not ctx.args:
@@ -1376,7 +1376,7 @@ async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ── /leave ───────────────────────────────────────────────────────────────────
-async def leave_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+async def _leave_cmd_background(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await require_access(update, ctx):
         return
     if not ctx.args:
@@ -2470,6 +2470,25 @@ async def recv_count(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ])
     )
     return CONFIRM_REPORT
+
+
+
+# Long-running session operations run outside the update handler so other users'
+# commands can continue to be dispatched while progress messages are updated.
+def _launch_background(ctx: ContextTypes.DEFAULT_TYPE, coroutine, task_name: str):
+    ctx.application.create_task(coroutine, name=task_name)
+
+
+async def refresh_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    _launch_background(ctx, _refresh_cmd_background(update, ctx), "refresh-operation")
+
+
+async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    _launch_background(ctx, _join_cmd_background(update, ctx), "join-operation")
+
+
+async def leave_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    _launch_background(ctx, _leave_cmd_background(update, ctx), "leave-operation")
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
