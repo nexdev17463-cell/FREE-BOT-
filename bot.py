@@ -203,7 +203,7 @@ def stop_progress_kb(owner_uid: int, msg_id: int) -> InlineKeyboardMarkup:
 
 def main_menu_kb() -> InlineKeyboardMarkup:
     developer_button = InlineKeyboardButton(
-        "◈ 𝗗𝗘𝗙𝗛𝗜𝗓𝗖𝗘𝗥 ◈",
+        "◈ 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ◈",
         url="https://t.me/SAREEF_FUCKER",
         style="danger",
         icon_custom_emoji_id="6091123254842366873",
