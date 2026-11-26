@@ -19,6 +19,7 @@ from telethon.tl.types import (
     InputReportReasonPersonalDetails, PeerChannel,
 )
 from session_manager import mark_expired
+from session_locks import get_session_lock
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +241,8 @@ async def mass_report(
 
     async def worker(sdata: dict):
         phone = sdata["phone"]
+        session_lock = get_session_lock(phone)
+        await session_lock.acquire()
         client = None
         is_pyro = sdata.get("client_type", "telethon") == "pyrogram"
         try:
@@ -306,6 +309,7 @@ async def mass_report(
                         await client.disconnect()
                 except Exception:
                     pass
+            session_lock.release()
 
     await asyncio.gather(*[worker(s) for s in sessions])
     return results
@@ -325,6 +329,8 @@ async def mass_join(sessions: list[dict], target: str, progress_cb=None) -> dict
 
     async def worker(sdata: dict):
         phone = sdata["phone"]
+        session_lock = get_session_lock(phone)
+        await session_lock.acquire()
         client = None
         is_pyro = sdata.get("client_type", "telethon") == "pyrogram"
         try:
@@ -384,6 +390,7 @@ async def mass_join(sessions: list[dict], target: str, progress_cb=None) -> dict
                         await client.disconnect()
                 except Exception:
                     pass
+            session_lock.release()
         if progress_cb:
             await progress_cb(results)
 
@@ -419,6 +426,8 @@ async def mass_leave(sessions: list[dict], target: str, progress_cb=None) -> dic
 
     async def worker(sdata: dict):
         phone = sdata["phone"]
+        session_lock = get_session_lock(phone)
+        await session_lock.acquire()
         client = None
         is_pyro = sdata.get("client_type", "telethon") == "pyrogram"
         try:
@@ -497,6 +506,7 @@ async def mass_leave(sessions: list[dict], target: str, progress_cb=None) -> dic
                         await client.disconnect()
                 except Exception:
                     pass
+            session_lock.release()
         if progress_cb:
             await progress_cb(results)
 
