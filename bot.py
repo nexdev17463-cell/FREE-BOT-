@@ -784,7 +784,11 @@ async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ("Prepare status summary", "Pending", "⌛ WAITING"),
         ])
     )
+    progress_chat_id = update.effective_chat.id
+    progress_id = await rich_progress_send(ctx, progress_chat_id, progress_panel("📊 ACCOUNT STATUS", "Loading session statistics", [("Database query", "Running", "⏳ RUNNING"), ("Count calculation", "Waiting", "⌛ WAITING"), ("Summary table", "Waiting", "⌛ WAITING")]))
     records = await get_all_status_sessions()
+    if progress_id:
+        await rich_progress_edit(ctx, progress_chat_id, progress_id, progress_panel("📊 ACCOUNT STATUS", "Calculating account totals", [("Database query", f"{len(records)} records loaded", "✅ DONE"), ("Count calculation", "Running", "⏳ RUNNING"), ("Summary table", "Waiting", "⌛ WAITING")]))
     await rich_progress_edit(
         ctx, update.effective_chat.id, progress_id,
         progress_panel("📊 ACCOUNT STATUS", "Calculating session statistics", [
@@ -798,6 +802,8 @@ async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "expired": sum(1 for item in records if not item.get("active", False)),
         "total": len(records),
     }
+    if progress_id:
+        await rich_progress_edit(ctx, progress_chat_id, progress_id, progress_panel("📊 ACCOUNT STATUS", "Preparing status dashboard", [("Database query", f"{len(records)} records loaded", "✅ DONE"), ("Count calculation", "Completed", "✅ DONE"), ("Summary table", "Ready", "✅ DONE")]))
     cached = {
         "owner_id": update.effective_user.id,
         "counts": counts,
@@ -1173,6 +1179,8 @@ async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ("Render result", "Pending", "⌛ WAITING"),
         ])
     )
+    progress_chat_id = update.effective_chat.id
+    progress_id = await rich_progress_send(ctx, progress_chat_id, progress_panel("📋 SESSION DIRECTORY", "Loading your saved sessions", [("Access check", "Authorized", "✅ DONE"), ("Database query", "Running", "⏳ RUNNING"), ("Session table", "Waiting", "⌛ WAITING")]))
     sessions = await get_user_sessions(update.effective_user.id)
     await rich_progress_edit(
         ctx, update.effective_chat.id, progress_id,
@@ -1192,7 +1200,10 @@ async def session_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
            if rows else "<p>There are no saved sessions yet.</p>")
         + "<footer>Only sessions linked to your account are listed here.</footer>"
     )
-    await send_rich_message(update, ctx, rich, main_menu_kb())
+    if progress_id:
+        await rich_progress_edit(ctx, progress_chat_id, progress_id, rich)
+    else:
+        await send_rich_message(update, ctx, rich, main_menu_kb())
 
 # ── /unhost ──────────────────────────────────────────────────────────────────
 async def unhost_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
