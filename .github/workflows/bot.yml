@@ -1,4 +1,4 @@
-name: Mass Report Bot 24/7
+name: Community Bot (Test)
 
 on:
   push:
@@ -8,49 +8,34 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: community-bot-test
+  cancel-in-progress: true
+
 jobs:
-  run-bot:
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-
+  run:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 359
     steps:
-      - name: Checkout
+      - name: Checkout Test branch
         uses: actions/checkout@v4
+        with:
+          ref: Test
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
           cache: pip
-          cache-dependency-path: requirements.txt
 
       - name: Validate required configuration
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          API_ID: ${{ secrets.API_ID }}
-          API_HASH: ${{ secrets.API_HASH }}
-          MONGO_URI: ${{ secrets.MONGO_URI }}
         run: |
-          python - <<'PY'
-          import os
-          import sys
-
-          required = ("BOT_TOKEN", "API_ID", "API_HASH", "MONGO_URI")
-          missing = [name for name in required if not os.environ.get(name, "").strip()]
-          if missing:
-              print("Missing required GitHub Actions secrets: " + ", ".join(missing))
-              sys.exit(1)
-
-          try:
-              api_id = int(os.environ["API_ID"])
-              if api_id <= 0:
-                  raise ValueError
-          except ValueError:
-              print("API_ID must be a positive integer.")
-              sys.exit(1)
-
-          print("Required configuration is present.")
-          PY
+          if [ -z "$BOT_TOKEN" ]; then
+            echo "::error::Missing BOT_TOKEN repository secret"
+            exit 1
+          fi
 
       - name: Install dependencies
         run: |
@@ -58,15 +43,12 @@ jobs:
           pip install -r requirements.txt
           pip check
 
-      - name: Validate Python syntax
+      - name: Compile Python files
         run: python -m compileall -q .
 
-      - name: Run bot
+      - name: Start community bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          API_ID: ${{ secrets.API_ID }}
-          API_HASH: ${{ secrets.API_HASH }}
-          MONGO_URI: ${{ secrets.MONGO_URI }}
           OWNER_ID: ${{ secrets.OWNER_ID }}
           OWNER_USERNAME: ${{ secrets.OWNER_USERNAME }}
         run: python bot.py
