@@ -1270,21 +1270,50 @@ async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         done = r["joined"] + r["already"] + r["failed"]
         if now - last["t"] >= 1 or done >= total:
             last["t"] = now
+            progress_html = (
+                "<h2>⏳ JOIN IN PROGRESS</h2>"
+                f"<p><i>Target: <code>{html.escape(target)}</code></i></p><hr/>"
+                "<table bordered striped>"
+                "<tr><th>RESULT</th><th>COUNT</th></tr>"
+                f"<tr><td>✅ Joined</td><td><b>{r['joined']}</b></td></tr>"
+                f"<tr><td>🔄 Already Member</td><td><b>{r['already']}</b></td></tr>"
+                f"<tr><td>❌ Failed</td><td><b>{r['failed']}</b></td></tr>"
+                f"<tr><td>📊 Done</td><td><b>{done} / {total}</b></td></tr>"
+                "</table>"
+                "<footer>Join operation is running…</footer>"
+            )
+            progress_payload = {
+                "chat_id": chat_id,
+                "message_id": msg_id,
+                "rich_message": {"html": apply_custom_emojis(progress_html)},
+            }
             try:
-                await ctx.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=msg_id,
-                    text=(
-                        f"⏳ <b>Joining</b> <code>{html.escape(target)}</code>\n\n"
-                        f"✅ Joined  : <code>{r['joined']}</code>\n"
-                        f"🔄 Already : <code>{r['already']}</code>\n"
-                        f"❌ Failed  : <code>{r['failed']}</code>\n"
-                        f"📊 Done    : <code>{done} / {total}</code>"
-                    ),
-                    parse_mode=ParseMode.HTML,
-                )
-            except Exception:
-                pass
+                timeout = aiohttp.ClientTimeout(total=15)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(
+                        f"https://api.telegram.org/bot{ctx.bot.token}/editMessageText",
+                        json=progress_payload,
+                    ) as response:
+                        result = await response.json(content_type=None)
+                        if not response.ok or not result.get("ok"):
+                            raise RuntimeError(result.get("description", "Rich join progress update failed"))
+            except Exception as exc:
+                logging.debug("Rich join progress update failed: %s", exc)
+                try:
+                    await ctx.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=msg_id,
+                        text=(
+                            f"⏳ <b>Joining</b> <code>{html.escape(target)}</code>\\n\\n"
+                            f"✅ Joined  : <code>{r['joined']}</code>\\n"
+                            f"🔄 Already : <code>{r['already']}</code>\\n"
+                            f"❌ Failed  : <code>{r['failed']}</code>\\n"
+                            f"📊 Done    : <code>{done} / {total}</code>"
+                        ),
+                        parse_mode=ParseMode.HTML,
+                    )
+                except Exception:
+                    pass
 
     join_result = await mass_join(sessions, target, progress_cb=cb)
 
