@@ -1133,8 +1133,16 @@ async def unhost_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not ctx.args:
         await send_rich_message(
             update, ctx,
-            "<h2>🗑 REMOVE A SESSION</h2><p>Provide the phone number of the session you want to remove.</p>"
+            "<h1>🗑 REMOVE HOSTED ACCOUNT</h1>"
+            "<p><i>Permanently remove one saved Telegram session from the bot.</i></p><hr/>"
+            "<h2>📌 REQUIRED DETAILS</h2>"
+            "<table bordered striped>"
+            "<tr><th>FIELD</th><th>FORMAT</th></tr>"
+            "<tr><td>Phone number</td><td><code>+919876543210</code></td></tr>"
+            "</table>"
+            "<h3>⌨️ COMMAND</h3>"
             "<p><code>/unhost +919876543210</code></p>"
+            "<footer>⚠️ This removes the saved session. Make sure the number is correct before proceeding.</footer>"
         )
         return
     phone   = ctx.args[0].strip()
@@ -1164,11 +1172,17 @@ async def remove_expired_id_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not ctx.args:
         await send_rich_message(
             update, ctx,
-            "<h1>🗑 REMOVE EXPIRED ID</h1>"
-            "<p>Enter the exact phone number of an account already listed as expired.</p>"
-            "<p>Usage: <code>/removeexpiredid +919876543210</code></p>"
-            "<p>Remove all expired IDs: <code>/removeexpiredid all</code></p>"
-            "<footer>⚠️ The saved session record will be permanently deleted.</footer>"
+            "<h1>🧹 EXPIRED SESSION CLEANUP</h1>"
+            "<p><i>Remove expired session records from the database.</i></p><hr/>"
+            "<h2>🎯 SUPPORTED OPTIONS</h2>"
+            "<table bordered striped>"
+            "<tr><th>TYPE</th><th>COMMAND</th></tr>"
+            "<tr><td>Single expired ID</td><td><code>/removeexpiredid +919876543210</code></td></tr>"
+            "<tr><td>All expired IDs</td><td><code>/removeexpiredid all</code></td></tr>"
+            "</table>"
+            "<h3>📌 IMPORTANT</h3>"
+            "<p>Only records marked as expired are eligible for deletion. Active session records are kept safe when using <code>all</code>.</p>"
+            "<footer>⚠️ Deleted session records cannot be restored from this command.</footer>"
         )
         return
 
@@ -1238,11 +1252,21 @@ async def join_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not ctx.args:
         await send_rich_message(
             update, ctx,
-            "<h2>👥 JOIN CHAT</h2>"
-            "<p>Provide a target to join with all authorized accounts.</p><hr/>"
-            "<p>Usage:</p>"
-            "<p><code>/join @username</code></p>"
-            "<p><code>/join https://t.me/+hash</code></p>",
+            "<h1>👥 JOIN CHAT</h1>"
+            "<p><i>Join a group or channel with your authorized connected accounts.</i></p><hr/>"
+            "<h2>🎯 SUPPORTED TARGET FORMATS</h2>"
+            "<table bordered striped>"
+            "<tr><th>TYPE</th><th>FORMAT</th></tr>"
+            "<tr><td>Username</td><td><code>@groupusername</code></td></tr>"
+            "<tr><td>Public link</td><td><code>https://t.me/groupusername</code></td></tr>"
+            "<tr><td>Invite link</td><td><code>https://t.me/+INVITE_CODE</code></td></tr>"
+            "<tr><td>Chat ID</td><td><code>-1001234567890</code></td></tr>"
+            "</table>"
+            "<h3>⌨️ EXAMPLES</h3>"
+            "<p><code>/join @groupusername</code></p>"
+            "<p><code>/join https://t.me/+ABC123</code></p>"
+            "<p><code>/join -1001234567890</code></p>"
+            "<footer>Use only accounts you own or are explicitly authorized to manage.</footer>",
             main_menu_kb()
         )
         return
