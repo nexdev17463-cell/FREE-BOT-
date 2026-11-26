@@ -67,6 +67,12 @@ async def delete_expired_session(phone: str) -> int:
     result = await sessions.delete_many({"phone": phone})
     return result.deleted_count
 
+
+async def delete_all_expired_sessions() -> int:
+    """Permanently delete only session documents explicitly marked as expired."""
+    result = await get_db().sessions.delete_many({"active": False})
+    return result.deleted_count
+
 async def get_total_count() -> int:
     return await get_db().sessions.count_documents({})
 
