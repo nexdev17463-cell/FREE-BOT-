@@ -3,8 +3,38 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 from config import API_ID, API_HASH, MONGO_URI
 from datetime import datetime, timezone
+import logging
 
 _db = None
+
+# Only explicit Telegram authentication/session failures make a session expired.
+# Transport, rate-limit, server, and other API failures remain retryable errors.
+_AUTHENTICATION_ERROR_NAMES = frozenset({
+    "AuthKeyUnregisteredError",
+    "AuthKeyInvalidError",
+    "AuthKeyInvalid",
+    "AuthKeyUnregistered",
+    "AuthKeyDuplicatedError",
+    "AuthKeyDuplicated",
+    "SessionRevokedError",
+    "SessionRevoked",
+    "SessionExpiredError",
+    "SessionExpired",
+    "UserDeactivatedError",
+    "UserDeactivated",
+    "UserDeactivatedBanError",
+    "UserDeactivatedBan",
+    "UnauthorizedError",
+    "Unauthorized",
+})
+
+
+def is_authentication_error(exc: Exception) -> bool:
+    """Return True only for known, explicit Telegram session/auth failures."""
+    return any(
+        cls.__name__ in _AUTHENTICATION_ERROR_NAMES
+        for cls in type(exc).__mro__
+    )
 
 def get_db():
     global _db
@@ -118,55 +148,86 @@ async def build_client(sdata: dict):
 
 
 async def refresh_all_sessions(on_progress=None) -> dict:
+    """Check every stored session without treating transient failures as expired."""
     records = await get_db().sessions.find({}).to_list(length=None)
-    result = {"active": 0, "expired": 0, "checked": 0, "errors": 0, "active_ids": [], "expired_ids": [], "error_ids": [], "checked_ids": []}
+    result = {
+        "active": 0, "expired": 0, "checked": 0, "errors": 0,
+        "active_ids": [], "expired_ids": [], "error_ids": [], "checked_ids": [],
+    }
     total = len(records)
+
     for index, item in enumerate(records, 1):
         client = None
         status = "error"
+        phone = item.get("phone", "Unknown")
+        client_type = item.get("client_type", "telethon")
+
         try:
             client = await build_client(item)
-            client_type = item.get("client_type", "telethon")
             if client_type == "pyrogram":
                 await client.start()
                 authorized = await client.get_me() is not None
                 await client.stop()
+                client = None
             else:
                 await client.connect()
                 authorized = await client.is_user_authorized()
                 await client.disconnect()
+                client = None
 
             if authorized:
                 await mark_active(item["phone"])
                 result["active"] += 1
-                result["active_ids"].append(item.get("phone", "Unknown"))
-                result["checked_ids"].append(item.get("phone", "Unknown"))
+                result["active_ids"].append(phone)
+                result["checked_ids"].append(phone)
                 status = "active"
             else:
+                # A completed authorization check returning False is definitive.
                 await mark_expired(item["phone"])
                 result["expired"] += 1
-                result["expired_ids"].append(item.get("phone", "Unknown"))
-                result["checked_ids"].append(item.get("phone", "Unknown"))
+                result["expired_ids"].append(phone)
+                result["checked_ids"].append(phone)
                 status = "expired"
             result["checked"] += 1
-        except Exception:
-            result["errors"] += 1
-            result["error_ids"].append(item.get("phone", "Unknown"))
-            status = "error"
-            if client:
+
+        except Exception as exc:
+            if is_authentication_error(exc):
                 try:
-                    client_type = item.get("client_type", "telethon")
+                    await mark_expired(item["phone"])
+                except Exception:
+                    # A failed database write must not be reported as expired.
+                    logging.exception("Could not persist expired status for session %s", phone)
+                    result["errors"] += 1
+                    result["error_ids"].append(phone)
+                    status = "error"
+                else:
+                    result["expired"] += 1
+                    result["expired_ids"].append(phone)
+                    result["checked"] += 1
+                    result["checked_ids"].append(phone)
+                    status = "expired"
+            else:
+                # Network/API/rate-limit failures leave the stored status untouched.
+                result["errors"] += 1
+                result["error_ids"].append(phone)
+                status = "error"
+                logging.warning("Temporary or unclassified refresh failure for %s: %s", phone, exc)
+
+            if client is not None:
+                try:
                     if client_type == "pyrogram":
                         await client.stop()
                     else:
                         await client.disconnect()
                 except Exception:
                     pass
+
         finally:
             if on_progress:
                 try:
-                    await on_progress(index, total, item.get("phone", "Unknown"), status)
+                    await on_progress(index, total, phone, status)
                 except Exception:
                     # UI reporting must never interrupt the actual session refresh.
                     pass
+
     return result
