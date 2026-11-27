@@ -4,6 +4,7 @@ emojis.txt is the single source of truth for every Telegram-facing UI path.
 """
 
 import logging
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ for _emoji, _custom_id in CUSTOM_EMOJI_IDS.items():
         _EMOJI_ALIASES.setdefault(_alias, _custom_id)
 
 _SORTED_EMOJIS = sorted(_EMOJI_ALIASES, key=len, reverse=True)
+_EMOJI_PATTERN = re.compile("|".join(re.escape(item) for item in _SORTED_EMOJIS))
 
 
 def custom_emoji_id_for(emoji: str) -> str | None:
@@ -70,12 +72,12 @@ def custom_emoji_id_for(emoji: str) -> str | None:
 
 def apply_custom_emojis(rich_html: str) -> str:
     """Convert mapped emoji in Telegram HTML into custom-emoji tags."""
-    for emoji in _SORTED_EMOJIS:
+    def replace_match(match):
+        emoji = match.group(0)
         custom_id = _EMOJI_ALIASES[emoji]
-        rich_html = rich_html.replace(
-            emoji, f'<tg-emoji emoji-id="{custom_id}">{emoji}</tg-emoji>'
-        )
-    return rich_html
+        return f'<tg-emoji emoji-id="{custom_id}">{emoji}</tg-emoji>'
+
+    return _EMOJI_PATTERN.sub(replace_match, rich_html)
 
 
 def rich_text_with_custom_emojis(value: str):
