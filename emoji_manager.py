@@ -62,7 +62,7 @@ for _emoji, _custom_id in CUSTOM_EMOJI_IDS.items():
         _EMOJI_ALIASES.setdefault(_alias, _custom_id)
 
 _SORTED_EMOJIS = sorted(_EMOJI_ALIASES, key=len, reverse=True)
-_EMOJI_PATTERN = re.compile("|".join(re.escape(item) for item in _SORTED_EMOJIS))
+_EMOJI_PATTERN = re.compile("|".join(re.escape(item) for item in _SORTED_EMOJIS) or r"(?!x)x")
 
 
 def custom_emoji_id_for(emoji: str) -> str | None:
@@ -144,4 +144,4 @@ def get_button_custom_emoji(text: str) -> tuple[str | None, str | None]:
             first_pos = pos
     if first is None:
         return None, None
-    return first, CUSTOM_EMOJI_IDS[first]
+    return first, _EMOJI_ALIASES[first]
