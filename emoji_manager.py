@@ -110,7 +110,7 @@ def convert_rich_blocks(blocks):
                     if isinstance(label, str):
                         leading, custom_id = get_button_custom_emoji(label)
                         if leading and custom_id:
-                            button["text"] = label[len(leading):].lstrip()
+                            button["text"] = label.replace(leading, "", 1).strip()
                             button["icon_custom_emoji_id"] = custom_id
                     result[key] = button
                 elif key == "text" and isinstance(item, str):
@@ -124,8 +124,14 @@ def convert_rich_blocks(blocks):
 
 
 def get_button_custom_emoji(text: str) -> tuple[str | None, str | None]:
-    """Return (leading emoji, custom ID) for Telegram's button-icon field."""
+    """Return the first mapped emoji and ID for Telegram's single button-icon field."""
+    first = None
+    first_pos = len(text)
     for emoji in _SORTED_EMOJIS:
-        if text.startswith(emoji):
-            return emoji, CUSTOM_EMOJI_IDS[emoji]
-    return None, None
+        pos = text.find(emoji)
+        if pos != -1 and pos < first_pos:
+            first = emoji
+            first_pos = pos
+    if first is None:
+        return None, None
+    return first, CUSTOM_EMOJI_IDS[first]
