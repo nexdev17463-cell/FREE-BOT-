@@ -122,7 +122,7 @@ _BUTTON_SMALL_CAPS = str.maketrans({
 def btn(text: str, data: str) -> InlineKeyboardButton:
     leading_emoji, icon_custom_emoji_id = get_button_custom_emoji(text)
     if leading_emoji:
-        text = text[len(leading_emoji):].lstrip()
+        text = text.replace(leading_emoji, "", 1).strip()
 
     styled_text = text.translate(_BUTTON_SMALL_CAPS)
     style = random.choice(_BTN_STYLES)
