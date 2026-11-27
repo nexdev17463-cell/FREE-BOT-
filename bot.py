@@ -23,7 +23,7 @@ from access_manager import (
 )
 from reporter import mass_report, mass_join, mass_leave
 from proxy_manager import fetch_proxies, rotate_forever
-from emoji_manager import apply_custom_emojis, get_button_custom_emoji
+from emoji_manager import CUSTOM_EMOJI_IDS, apply_custom_emojis, get_button_custom_emoji
 
 logging.basicConfig(level=logging.INFO)
 
