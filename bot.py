@@ -478,7 +478,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await remember_user(update.effective_user)
 
     welcome_html = (
-        "<h1>⭐ 𝗗𝗘𝗓𝗚𝗢𝗘 𝗧𝗢 𝗠𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 𝗕𝗢𝗧</h1>"
+        "<h1>⭐ 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 𝗠𝗔𝗦𝗦 𝗥𝗘𝗣𝗢𝗥𝗧 ⭐  𝗕𝗢𝗧</h1>"
         "<p><i>Your account management command center</i></p>"
         "<hr/>"
         "<h2>🚀 Get Started</h2>"
