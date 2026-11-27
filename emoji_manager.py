@@ -51,18 +51,27 @@ def load_emoji_map(path: Path = _EMOJI_FILE) -> dict[str, str]:
 
 
 CUSTOM_EMOJI_IDS = load_emoji_map()
-_SORTED_EMOJIS = sorted(CUSTOM_EMOJI_IDS, key=len, reverse=True)
+
+# Telegram/client text can contain the same visible emoji with or without
+# the optional U+FE0F variation selector. Treat those spellings identically.
+_EMOJI_ALIASES: dict[str, str] = {}
+for _emoji, _custom_id in CUSTOM_EMOJI_IDS.items():
+    _base = _emoji.replace("\ufe0f", "")
+    for _alias in {_emoji, _base, _base + "\ufe0f"}:
+        _EMOJI_ALIASES.setdefault(_alias, _custom_id)
+
+_SORTED_EMOJIS = sorted(_EMOJI_ALIASES, key=len, reverse=True)
 
 
 def custom_emoji_id_for(emoji: str) -> str | None:
-    """Return the configured ID for one exact emoji glyph."""
-    return CUSTOM_EMOJI_IDS.get(emoji)
+    """Return the configured ID, accepting optional variation-selector differences."""
+    return CUSTOM_EMOJI_IDS.get(emoji) or _EMOJI_ALIASES.get(emoji)
 
 
 def apply_custom_emojis(rich_html: str) -> str:
     """Convert mapped emoji in Telegram HTML into custom-emoji tags."""
     for emoji in _SORTED_EMOJIS:
-        custom_id = CUSTOM_EMOJI_IDS[emoji]
+        custom_id = _EMOJI_ALIASES[emoji]
         rich_html = rich_html.replace(
             emoji, f'<tg-emoji emoji-id="{custom_id}">{emoji}</tg-emoji>'
         )
@@ -79,7 +88,7 @@ def rich_text_with_custom_emojis(value: str):
         for emoji in _SORTED_EMOJIS:
             pos = remaining.find(emoji)
             if pos != -1 and pos < match_pos:
-                match = (emoji, CUSTOM_EMOJI_IDS[emoji])
+                match = (emoji, _EMOJI_ALIASES[emoji])
                 match_pos = pos
         if match is None:
             parts.append(remaining)
@@ -94,7 +103,6 @@ def rich_text_with_custom_emojis(value: str):
         })
         remaining = remaining[match_pos + len(emoji):]
     return parts or [str(value)]
-
 
 def convert_rich_blocks(blocks):
     """Recursively convert text in rich-message blocks, including nested cells."""
