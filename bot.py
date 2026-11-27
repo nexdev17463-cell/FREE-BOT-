@@ -5,6 +5,7 @@ import html
 import logging
 import random
 import re
+from types import SimpleNamespace
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
@@ -198,7 +199,7 @@ async def _send_html_message(ctx, chat_id: int, text: str, reply_markup=None):
             result = await response.json(content_type=None)
             if not response.ok or not result.get("ok"):
                 raise RuntimeError(result.get("description", "Telegram sendMessage failed"))
-            return result["result"]
+            return SimpleNamespace(**result["result"])
 
 
 async def _edit_html_message(ctx, chat_id: int, message_id: int,
@@ -2293,7 +2294,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         "◈ 𝗗𝗘𝗙𝗛𝗜𝗓𝗖𝗘𝗥 ◈",
                         url=f"https://t.me/{developer}",
                         style="danger",
-                        icon_custom_emoji_id="6091123254842366873",
+                        icon_custom_emoji_id=custom_emoji_id_for("👤"),
                     )
                 ]])
             )
