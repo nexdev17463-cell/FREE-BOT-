@@ -23,7 +23,11 @@ from access_manager import (
 )
 from reporter import mass_report, mass_join, mass_leave
 from proxy_manager import fetch_proxies, rotate_forever
-from emoji_manager import (\n    CUSTOM_EMOJI_IDS, apply_custom_emojis, get_button_custom_emoji,\n    rich_text_with_custom_emojis as _shared_rich_text_with_custom_emojis,\n    convert_rich_blocks, custom_emoji_id_for,\n)
+from emoji_manager import (
+    CUSTOM_EMOJI_IDS, apply_custom_emojis, get_button_custom_emoji,
+    rich_text_with_custom_emojis as _shared_rich_text_with_custom_emojis,
+    convert_rich_blocks, custom_emoji_id_for,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -249,10 +253,7 @@ async def send_rich_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
     plain_html = re.sub(r"</?tg-emoji[^>]*>", "", plain_html)
     plain_html = plain_html.replace("<hr/>", "\\n━━━━━━━━━━━━━━━━━━\\n")
     if edit and update.callback_query:
-        await _edit_html_message(
-            ctx, chat_id, update.callback_query.message.message_id,
-            plain_html, reply_markup=reply_markup
-        )
+        await _edit_html_message(ctx, chat_id, update.callback_query.message.message_id, plain_html, reply_markup=reply_markup)
     else:
         await _send_html_message(ctx, chat_id, plain_html, reply_markup=reply_markup)
 
@@ -282,10 +283,7 @@ async def _rich_edit_by_id(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
 
     if fallback_text is not None:
         try:
-            await _edit_html_message(
-                ctx, chat_id, message_id, fallback_text,
-                reply_markup=fallback_markup,
-            )
+            await _edit_html_message(ctx, chat_id, message_id, fallback_text, reply_markup=fallback_markup)
         except Exception as exc2:
             logging.warning("Fallback edit also failed: %s", exc2)
 
@@ -308,10 +306,7 @@ async def _rich_send_blocks_new(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
                 return result["result"]["message_id"]
     except Exception as exc:
         logging.warning("Rich blocks send unavailable; using HTML fallback: %s", exc)
-        msg = await _send_html_message(
-            ctx, chat_id, fallback_text or fallback_html,
-            reply_markup=fallback_markup or reply_markup,
-        )
+        msg = await _send_html_message(ctx, chat_id, fallback_text or fallback_html, reply_markup=fallback_markup or reply_markup)
         return msg.message_id
 
 
@@ -339,9 +334,7 @@ async def _rich_send_new(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
         logging.warning("Rich send (new) unavailable; using HTML fallback: %s", exc)
 
     if fallback_text is not None:
-        msg = await _send_html_message(
-            ctx, chat_id, fallback_text, reply_markup=fallback_markup,
-        )
+        msg = await _send_html_message(ctx, chat_id, fallback_text, reply_markup=fallback_markup)
         return msg.message_id
     return None
 
@@ -552,14 +545,9 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         fallback += "\n<b>🔐 𝗔ᴄᴄᴇᴄ</b>\nOwner / Sudo: authorized bot operations."
         if update.callback_query:
-            await _edit_html_message(
-                ctx, chat_id, update.callback_query.message.message_id,
-                fallback, reply_markup=kb,
-            )
+            await _edit_html_message(ctx, chat_id, update.callback_query.message.message_id, fallback, reply_markup=kb)
         else:
-            await _send_html_message(
-                ctx, chat_id, fallback, reply_markup=main_menu_kb()
-            )
+            await _send_html_message(ctx, chat_id, fallback, reply_markup=main_menu_kb())
 
 # ── /host ────────────────────────────────────────────────────────────────
 async def host_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -749,6 +737,293 @@ def rich_text_with_custom_emojis(value: str):
     return _shared_rich_text_with_custom_emojis(value)
 
 
+def build_status_summary_blocks(counts: dict):
+    rows = [
+        ("🟢 Active", counts["active"], "success", "status_view:active"),
+        ("🔴 Expired", counts["expired"], "danger", "status_view:expired"),
+        ("📦 Total", counts["total"], "primary", "status_view:total"),
+    ]
+    cells = [[
+        {"text": "STATUS", "is_header": True},
+        {"text": "COUNT", "is_header": True, "align": "center"},
+        {"text": "DETAILS", "is_header": True, "align": "center"},
+    ]]
+    for label, count, style, callback in rows:
+        cells.append([
+            {"text": rich_text_with_custom_emojis(label)},
+            {"text": str(count), "align": "center"},
+            {"text": [{"type": "button", "button": {
+                "text": "ᴠɪᴇᴡ", "style": style, "callback_data": callback
+            }}], "align": "center"},
+        ])
+    return [
+        {"type": "heading", "size": 1, "text": rich_text_with_custom_emojis("📊 ACCOUNT STATUS")},
+        {"type": "paragraph", "text": "Live session overview"},
+        {"type": "divider"},
+        {"type": "table", "cells": cells, "is_bordered": True, "is_striped": True},
+        {"type": "footer", "text": "Session statistics"},
+    ]
+
+
+async def edit_status_summary(ctx, chat_id: int, message_id: int, counts: dict):
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "rich_message": {"blocks": convert_rich_blocks(build_status_summary_blocks(counts))},
+        "reply_markup": status_kb().to_dict(),
+    }
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(api_base + "editMessageText", json=payload) as response:
+            data = await response.json(content_type=None)
+            if not response.ok or not data.get("ok"):
+                raise RuntimeError(data.get("description", "Status summary edit failed"))
+
+
+async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await require_access(update, ctx):
+        return
+    records = await get_all_status_sessions()
+    counts = {
+        "active": sum(1 for item in records if item.get("active", False)),
+        "expired": sum(1 for item in records if not item.get("active", False)),
+        "total": len(records),
+    }
+    cached = {
+        "owner_id": update.effective_user.id,
+        "counts": counts,
+        "active": [item.get("phone", "Unknown") for item in records if item.get("active", False)],
+        "expired": [item.get("phone", "Unknown") for item in records if not item.get("active", False)],
+        "total": [item.get("phone", "Unknown") for item in records],
+    }
+    rich_fallback = (
+        "<h1>📊 ACCOUNT STATUS</h1><p><i>Live session overview</i></p><hr/>"
+        "<table bordered striped><tr><th>STATUS</th><th>COUNT</th><th>DETAILS</th></tr>"
+        f"<tr><td>🟢 Active</td><td><b>{counts['active']}</b></td><td>ᴠɪᴇᴡ</td></tr>"
+        f"<tr><td>🔴 Expired</td><td><b>{counts['expired']}</b></td><td>ᴠɪᴇᴡ</td></tr>"
+        f"<tr><td>📦 Total</td><td><b>{counts['total']}</b></td><td>ᴠɪᴇᴡ</td></tr></table>"
+        "<footer>Session statistics</footer>"
+    )
+    if update.callback_query and update.callback_query.message:
+        message_id = update.callback_query.message.message_id
+        chat_id = update.callback_query.message.chat_id
+        ctx.application.bot_data[f"status:{chat_id}:{message_id}"] = cached
+        try:
+            await edit_status_summary(ctx, chat_id, message_id, counts)
+            return
+        except Exception as exc:
+            logging.debug("Rich status summary edit unavailable; using fallback: %s", exc)
+            await _edit_html_message(ctx, chat_id, message_id, rich_fallback, reply_markup=status_view_kb())
+            return
+
+    chat_id = update.effective_chat.id
+    fallback_text = (
+        "📊 <b>ACCOUNT STATUS</b>\n\n"
+        f"🟢 Active: <code>{counts['active']}</code>\n"
+        f"🔴 Expired: <code>{counts['expired']}</code>\n"
+        f"📦 Total: <code>{counts['total']}</code>"
+    )
+    message_id = await _rich_send_blocks_new(
+        ctx, chat_id, build_status_summary_blocks(counts),
+        rich_fallback, status_kb(), fallback_text,
+        fallback_markup=status_view_kb()
+    )
+    if message_id is not None:
+        ctx.application.bot_data[f"status:{chat_id}:{message_id}"] = cached
+
+
+def build_refresh_summary_blocks(result: dict):
+    rows = [
+        ("🟢 ACTIVE", result["active"], "success", "refresh_view:active"),
+        ("🔴 EXPIRED", result["expired"], "danger", "refresh_view:expired"),
+        ("⚠️ ERRORS", result["errors"], "danger", "refresh_view:errors"),
+        ("🎁 CHECKED", result["checked"], "primary", "refresh_view:checked"),
+    ]
+    cells = [[
+        {"text": "STATUS", "is_header": True},
+        {"text": "COUNT", "is_header": True, "align": "center"},
+        {"text": "DETAILS", "is_header": True, "align": "center"},
+    ]]
+    for label, count, style, callback in rows:
+        cells.append([
+            {"text": rich_text_with_custom_emojis(label)},
+            {"text": str(count), "align": "center"},
+            {"text": [{"type": "button", "button": {
+                "text": "ᴠɪᴇᴡ", "style": style, "callback_data": callback
+            }}], "align": "center"},
+        ])
+    return [
+        {"type": "heading", "size": 1, "text": rich_text_with_custom_emojis("⭐ SESSION REFRESH COMPLETE")},
+        {"type": "paragraph", "text": "All available session checks have finished."},
+        {"type": "divider"},
+        {"type": "table", "cells": cells, "is_bordered": True, "is_striped": True},
+        {"type": "footer", "text": rich_text_with_custom_emojis("🔐 Account numbers were kept private during verification")},
+    ]
+
+
+async def edit_refresh_summary(ctx, chat_id: int, message_id: int, result: dict):
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "rich_message": {"blocks": convert_rich_blocks(build_refresh_summary_blocks(result))},
+        "reply_markup": status_kb().to_dict(),
+    }
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(api_base + "editMessageText", json=payload) as response:
+            data = await response.json(content_type=None)
+            if not response.ok or not data.get("ok"):
+                raise RuntimeError(data.get("description", "Rich summary edit failed"))
+
+
+def build_join_summary_blocks(join_result: dict, total: int, target: str) -> list:
+    rows = [
+        ("✅ Joined",        join_result["joined"],  "success", "join_view:joined"),
+        ("🔄 Already Member",join_result["already"], "primary", "join_view:already"),
+        ("❌ Failed",        join_result["failed"],  "danger",  "join_view:failed"),
+        ("👥 Total Accounts",total,                  "primary", "join_view:total"),
+    ]
+    cells = [[
+        {"text": "RESULT", "is_header": True},
+        {"text": "COUNT", "is_header": True, "align": "center"},
+        {"text": "DETAILS", "is_header": True, "align": "center"},
+    ]]
+    for label, count, style, cb_data in rows:
+        cells.append([
+            {"text": label},
+            {"text": [{"type": "bold", "text": str(count)}], "align": "center"},
+            {"text": [{"type": "button", "button": {
+                "text": "ᴠɪᴇᴡ", "style": style, "callback_data": cb_data,
+            }}], "align": "center"},
+        ])
+    return [
+        {"type": "heading", "size": 1, "text": "✅ JOIN COMPLETE"},
+        {"type": "paragraph", "text": f"All accounts processed for {target}"},
+        {"type": "divider"},
+        {"type": "table", "cells": cells, "is_bordered": True, "is_striped": True},
+        {"type": "footer", "text": "Join operation finished."},
+    ]
+
+
+async def edit_join_summary(ctx, chat_id: int, message_id: int,
+                            join_result: dict, total: int, target: str):
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "rich_message": {"blocks": convert_rich_blocks(build_join_summary_blocks(join_result, total, target))},
+        "reply_markup": main_menu_kb().to_dict(),
+    }
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(api_base + "editMessageText", json=payload) as response:
+            data = await response.json(content_type=None)
+            if not response.ok or not data.get("ok"):
+                raise RuntimeError(data.get("description", "Join summary edit failed"))
+
+
+def build_report_summary_blocks(result: dict, target: str, total_ids: int, count: int) -> list:
+    rows = [
+        ("✅ Success",    result["success"],    "success", "report_view:success"),
+        ("❌ Failed",     result["failed"],     "danger",  "report_view:failed"),
+        ("🔴 Expired",   result["expired"],    "danger",  "report_view:expired"),
+        ("👥 Total IDs", total_ids,            "primary", "report_view:total"),
+        ("📊 Total Reports", total_ids * count, None,     None),
+    ]
+    cells = [[
+        {"text": "RESULT", "is_header": True},
+        {"text": "COUNT",  "is_header": True, "align": "center"},
+    ]]
+    for label, count_val, style, cb_data in rows:
+        if cb_data:
+            count_cell = {"text": [
+                {"type": "bold", "text": str(count_val)},
+                {"type": "button", "button": {
+                    "text": "ᴠɪᴇᴡ", "style": style, "callback_data": cb_data,
+                }},
+            ], "align": "center"}
+        else:
+            count_cell = {"text": str(count_val), "align": "center"}
+        cells.append([{"text": label}, count_cell])
+    blocks = [
+        {"type": "heading",  "size": 1, "text": "📊 REPORT COMPLETE"},
+        {"type": "paragraph","text": f"Mass report finished · Target: {target}"},
+        {"type": "divider"},
+        {"type": "table", "cells": cells, "is_bordered": True, "is_striped": True},
+    ]
+    if result.get("errors"):
+        unique = list(set(result["errors"]))[:5]
+        err_items = [{"type": "paragraph", "text": e} for e in unique]
+        blocks += [{"type": "heading", "size": 3, "text": "⚠️ ERRORS"}] + err_items
+    blocks.append({"type": "footer", "text": "Report session complete."})
+    return blocks
+
+
+async def edit_report_summary(ctx, chat_id: int, message_id: int,
+                              result: dict, target: str, total_ids: int, count: int):
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "rich_message": {"blocks": convert_rich_blocks(build_report_summary_blocks(result, target, total_ids, count))},
+        "reply_markup": main_menu_kb().to_dict(),
+    }
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(api_base + "editMessageText", json=payload) as response:
+            data = await response.json(content_type=None)
+            if not response.ok or not data.get("ok"):
+                raise RuntimeError(data.get("description", "Report summary edit failed"))
+
+
+def build_leave_summary_blocks(leave_result: dict, total: int, target: str) -> list:
+    rows = [
+        ("🟢 Leaved",        leave_result["leaved"],    "success", "leave_view:leaved"),
+        ("🟡 No Member",     leave_result["no_member"], "primary", "leave_view:no_member"),
+        ("🔴 Failed",        leave_result["failed"],    "danger",  "leave_view:failed"),
+        ("📦 Total Accounts",total,                     "primary", "leave_view:total"),
+    ]
+    cells = [[
+        {"text": "RESULT", "is_header": True},
+        {"text": "COUNT", "is_header": True, "align": "center"},
+        {"text": "DETAILS", "is_header": True, "align": "center"},
+    ]]
+    for label, count, style, cb_data in rows:
+        cells.append([
+            {"text": label},
+            {"text": [{"type": "bold", "text": str(count)}], "align": "center"},
+            {"text": [{"type": "button", "button": {
+                "text": "ᴠɪᴇᴡ", "style": style, "callback_data": cb_data,
+            }}], "align": "center"},
+        ])
+    return [
+        {"type": "heading",  "size": 1, "text": "🚪 LEAVE COMPLETE"},
+        {"type": "paragraph","text": f"All accounts processed for {target}"},
+        {"type": "divider"},
+        {"type": "table", "cells": cells, "is_bordered": True, "is_striped": True},
+        {"type": "footer", "text": "Leave operation finished."},
+    ]
+
+
+async def edit_leave_summary(ctx, chat_id: int, message_id: int,
+                             leave_result: dict, total: int, target: str):
+    api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "rich_message": {"blocks": convert_rich_blocks(build_leave_summary_blocks(leave_result, total, target))},
+        "reply_markup": main_menu_kb().to_dict(),
+    }
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(api_base + "editMessageText", json=payload) as response:
+            data = await response.json(content_type=None)
+            if not response.ok or not data.get("ok"):
+                raise RuntimeError(data.get("description", "Leave summary edit failed"))
+
+
 # ── Background task: Refresh ────────────────────────────────────────────────
 async def _run_refresh_task(
     ctx: ContextTypes.DEFAULT_TYPE,
@@ -872,10 +1147,7 @@ async def _run_refresh_task(
             f"🎁 CHECKED: {result['checked']}"
         )
         try:
-            await _edit_html_message(
-                ctx, chat_id, msg_id, final_text,
-                reply_markup=refresh_view_kb(),
-            )
+            await _edit_html_message(ctx, chat_id, msg_id, final_text, reply_markup=refresh_view_kb())
         except Exception:
             pass
 
