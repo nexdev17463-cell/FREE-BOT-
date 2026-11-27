@@ -2294,7 +2294,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         "◈ 𝗗𝗘𝗙𝗛𝗜𝗓𝗖𝗘𝗥 ◈",
                         url=f"https://t.me/{developer}",
                         style="danger",
-                        icon_custom_emoji_id=custom_emoji_id_for("👤"),
+                        icon_custom_emoji_id=custom_emoji_id_for("🕵🏻"),
                     )
                 ]])
             )
