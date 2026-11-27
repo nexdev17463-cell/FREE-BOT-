@@ -151,7 +151,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         "◈ 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ◈",
         url="https://t.me/SAREEF_FUCKER",
         style="danger",
-        icon_custom_emoji_id=custom_emoji_id_for("👤"),
+        icon_custom_emoji_id=custom_emoji_id_for("🕵🏻"),
     )
     return InlineKeyboardMarkup([
         [btn("➕ Add Account", "add_account"), btn("📊 Status", "status")],
