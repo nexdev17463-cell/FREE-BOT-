@@ -2485,7 +2485,7 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     phone = update.message.text.strip()
 
-    if not re.fullmatch(r"\\+[1-9]\\d{7,14}", phone):
+    if not re.fullmatch(r"\+[1-9]\d{7,14}", phone):
         await send_rich_message(
             update, ctx,
             "<h2>❌ INVALID PHONE NUMBER</h2>"
@@ -2586,7 +2586,7 @@ async def _complete_pyrogram_host(update: Update, ctx: ContextTypes.DEFAULT_TYPE
 
 async def recv_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    code = re.sub(r"\\s+", "", update.message.text or "")
+    code = re.sub(r"\s+", "", update.message.text or "")
     data = tmp.get(uid) or {}
     client = data.get("client")
 
