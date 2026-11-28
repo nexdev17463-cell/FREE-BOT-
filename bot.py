@@ -187,11 +187,9 @@ def refresh_view_kb() -> InlineKeyboardMarkup:
 
 
 # ── Premium message presentation ────────────────────────────────────────────────
-async def _send_html_message(ctx, chat_id: int, text: str, reply_markup=None,
-                            custom_emojis: bool = True):
-    """Send HTML; disable custom-emoji conversion for safe rich-message fallbacks."""
-    rendered_text = apply_custom_emojis(text) if custom_emojis else text
-    payload = {"chat_id": chat_id, "text": rendered_text, "parse_mode": "HTML"}
+async def _send_html_message(ctx, chat_id: int, text: str, reply_markup=None):
+    """Send HTML through Bot API so mapped custom-emoji tags work in fallbacks too."""
+    payload = {"chat_id": chat_id, "text": apply_custom_emojis(text), "parse_mode": "HTML"}
     if reply_markup:
         payload["reply_markup"] = reply_markup.to_dict()
     api_base = f"https://api.telegram.org/bot{ctx.bot.token}/"
@@ -205,13 +203,11 @@ async def _send_html_message(ctx, chat_id: int, text: str, reply_markup=None,
 
 
 async def _edit_html_message(ctx, chat_id: int, message_id: int,
-                             text: str, reply_markup=None,
-                             custom_emojis: bool = True):
-    """Edit HTML; disable custom-emoji conversion for safe rich-message fallbacks."""
-    rendered_text = apply_custom_emojis(text) if custom_emojis else text
+                             text: str, reply_markup=None):
+    """Edit HTML through Bot API so mapped custom-emoji tags work in fallbacks too."""
     payload = {
         "chat_id": chat_id, "message_id": message_id,
-        "text": rendered_text, "parse_mode": "HTML",
+        "text": apply_custom_emojis(text), "parse_mode": "HTML",
     }
     if reply_markup:
         payload["reply_markup"] = reply_markup.to_dict()
@@ -258,9 +254,9 @@ async def send_rich_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
     plain_html = re.sub(r"</?tg-emoji[^>]*>", "", plain_html)
     plain_html = plain_html.replace("<hr/>", "\\n━━━━━━━━━━━━━━━━━━\\n")
     if edit and update.callback_query:
-        await _edit_html_message(ctx, chat_id, update.callback_query.message.message_id, plain_html, reply_markup=reply_markup, custom_emojis=False)
+        await _edit_html_message(ctx, chat_id, update.callback_query.message.message_id, plain_html, reply_markup=reply_markup)
     else:
-        await _send_html_message(ctx, chat_id, plain_html, reply_markup=reply_markup, custom_emojis=False)
+        await _send_html_message(ctx, chat_id, plain_html, reply_markup=reply_markup)
 
 
 async def _rich_edit_by_id(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int,
@@ -2003,7 +1999,17 @@ async def cancel_flow(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await data["client"].disconnect()
         except Exception:
             pass
-    rich = "<h2>✓ ACTION CANCELLED</h2><p>Your current operation was cancelled.</p><footer>You can choose another option from the menu.</footer>"
+    rich = (
+        "<h1>OPERATION CANCELLED</h1>"
+        "<p>Your current process has been safely stopped.</p>"
+        "<table bordered striped>"
+        "<tr><th>STATUS</th><th>DETAILS</th></tr>"
+        "<tr><td><b>Result</b></td><td>Cancelled</td></tr>"
+        "<tr><td><b>Session</b></td><td>Active operation disconnected, if one was running</td></tr>"
+        "<tr><td><b>Next step</b></td><td>Choose an option from the main menu to continue</td></tr>"
+        "</table>"
+        "<footer>You are back at the main menu. No further action is running.</footer>"
+    )
     if update.callback_query:
         await update.callback_query.answer("Cancelled.")
         await send_rich_message(update, ctx, rich, main_menu_kb())
