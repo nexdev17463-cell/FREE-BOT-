@@ -2546,25 +2546,53 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not phone_code_hash:
             raise RuntimeError("Telegram did not return a login-code hash")
 
+        delivery_type = getattr(sent_code, "type", None)
+        next_type = getattr(sent_code, "next_type", None)
+        timeout = int(getattr(sent_code, "timeout", 0) or 0)
+        delivery_name = getattr(delivery_type, "name", str(delivery_type or "UNKNOWN"))
+        next_name = getattr(next_type, "name", "NONE") if next_type else "NONE"
+        delivery_labels = {
+            "APP": "Telegram app (check Telegram on an already logged-in device)",
+            "SMS": "SMS text message",
+            "CALL": "phone call",
+            "FLASH_CALL": "flash call",
+            "MISSED_CALL": "missed call",
+            "FRAGMENT_SMS": "Fragment SMS",
+            "EMAIL_CODE": "login email",
+        }
+        delivery_label = delivery_labels.get(
+            delivery_name, delivery_name.replace("_", " ").lower()
+        )
+
         tmp[uid] = {
             "client": client,
             "phone": phone,
             "phone_code_hash": phone_code_hash,
             "client_type": "pyrogram",
             "host_stage": "otp",
+            "code_next_type": next_type,
+            "code_timeout": timeout,
+            "code_requested_at": time.monotonic(),
+            "code_delivery": delivery_name,
         }
 
+        masked_phone = phone[:-4].replace(phone[:-4], "*" * max(0, len(phone) - 4)) + phone[-4:]
         logging.info(
-            "Pyrogram login code request accepted for %s (delivery=%s)",
-            phone, type(getattr(sent_code, "type", None)).__name__ or "unknown"
+            "Pyrogram /host code request accepted for ...%s (delivery=%s, next=%s, timeout=%ss)",
+            phone[-4:], delivery_name, next_name, timeout
         )
 
+        otp_keyboard = InlineKeyboardMarkup(
+            [[btn("🔄 Resend Code", "resend_host_code")], [btn("❌ Cancel", "cancel_flow")]]
+        ) if next_type else cancel_kb()
         await send_rich_message(
             update, ctx,
-            "<h1>🔐 TELEGRAM CODE SENT</h1>"
-            "<p>Enter the login code Telegram sent to your account.</p>"
-            "<footer>Send the code only in this private bot chat. Use /cancel to close the login.</footer>",
-            cancel_kb()
+            "<h1>🔐 TELEGRAM LOGIN CODE REQUESTED</h1>"
+            f"<p><b>Delivery method:</b> {html.escape(delivery_label)}</p>"
+            "<p>Enter the login code received through the method shown above.</p>"
+            + (f"<p>Telegram may allow another delivery method after {timeout} seconds. Use the resend button when it becomes available.</p>" if next_type else "<p>Telegram has not offered another delivery method for this request.</p>")
+            + "<footer>Only enter your own account's code in this private chat. Use /cancel to close the login.</footer>",
+            otp_keyboard
         )
         return ADD_CODE
 
@@ -2580,6 +2608,99 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             main_menu_kb()
         )
         return ConversationHandler.END
+
+
+async def resend_host_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Request Telegram's server-approved alternate delivery method when available."""
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+    data = tmp.get(uid) or {}
+    client = data.get("client")
+
+    if not client or data.get("host_stage") != "otp":
+        await send_rich_message(
+            update, ctx,
+            "<h2>⚠️ NO ACTIVE LOGIN</h2><p>Start a new login with /host.</p>",
+            main_menu_kb()
+        )
+        return ConversationHandler.END
+
+    next_type = data.get("code_next_type")
+    if not next_type:
+        await send_rich_message(
+            update, ctx,
+            "<h2>ℹ️ RESEND NOT AVAILABLE</h2><p>Telegram has not provided an alternate delivery method for this login request.</p>",
+            cancel_kb()
+        )
+        return ADD_CODE
+
+    timeout = int(data.get("code_timeout", 0) or 0)
+    requested_at = float(data.get("code_requested_at", 0) or 0)
+    remaining = timeout - int(time.monotonic() - requested_at)
+    if remaining > 0:
+        await send_rich_message(
+            update, ctx,
+            f"<h2>⏳ PLEASE WAIT</h2><p>Telegram allows the next delivery attempt in about {remaining} seconds.</p>",
+            InlineKeyboardMarkup([[btn("🔄 Check Again", "resend_host_code")], [btn("❌ Cancel", "cancel_flow")]])
+        )
+        return ADD_CODE
+
+    try:
+        sent_code = await client.resend_code(data["phone"], data["phone_code_hash"])
+        phone_code_hash = getattr(sent_code, "phone_code_hash", None)
+        if not phone_code_hash:
+            raise RuntimeError("Telegram did not return a new login-code hash")
+
+        delivery_type = getattr(sent_code, "type", None)
+        next_type = getattr(sent_code, "next_type", None)
+        timeout = int(getattr(sent_code, "timeout", 0) or 0)
+        delivery_name = getattr(delivery_type, "name", str(delivery_type or "UNKNOWN"))
+        delivery_labels = {
+            "APP": "Telegram app (check Telegram on an already logged-in device)",
+            "SMS": "SMS text message",
+            "CALL": "phone call",
+            "FLASH_CALL": "flash call",
+            "MISSED_CALL": "missed call",
+            "FRAGMENT_SMS": "Fragment SMS",
+            "EMAIL_CODE": "login email",
+        }
+        delivery_label = delivery_labels.get(delivery_name, delivery_name.replace("_", " ").lower())
+
+        data.update({
+            "phone_code_hash": phone_code_hash,
+            "code_next_type": next_type,
+            "code_timeout": timeout,
+            "code_requested_at": time.monotonic(),
+            "code_delivery": delivery_name,
+        })
+        logging.info(
+            "Pyrogram /host resend accepted for ...%s (delivery=%s, next=%s, timeout=%ss)",
+            data["phone"][-4:], delivery_name,
+            getattr(next_type, "name", "NONE") if next_type else "NONE",
+            timeout
+        )
+        keyboard = InlineKeyboardMarkup(
+            [[btn("🔄 Resend Code", "resend_host_code")], [btn("❌ Cancel", "cancel_flow")]]
+        ) if next_type else cancel_kb()
+        await send_rich_message(
+            update, ctx,
+            "<h1>🔐 LOGIN CODE REQUESTED AGAIN</h1>"
+            f"<p><b>Delivery method:</b> {html.escape(delivery_label)}</p>"
+            "<p>Use the newest code delivered by Telegram.</p>"
+            + (f"<p>Another delivery attempt may be available after {timeout} seconds.</p>" if next_type else ""),
+            keyboard
+        )
+    except Exception as exc:
+        logging.exception("Pyrogram /host resend failed for user %s", uid)
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ RESEND FAILED</h2>"
+            f"<p><code>{html.escape(str(exc))}</code></p>"
+            "<footer>Telegram did not accept the resend request. Wait before trying again.</footer>",
+            cancel_kb()
+        )
+    return ADD_CODE
 
 
 async def _close_host_client(client):
@@ -2828,7 +2949,10 @@ def main():
         ],
         states={
             ADD_PHONE:         [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_phone)],
-            ADD_CODE:          [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_code)],
+            ADD_CODE:          [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, recv_code),
+                CallbackQueryHandler(resend_host_code, pattern="^resend_host_code$"),
+            ],
             ADD_2FA:           [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_2fa)],
             REPORT_TARGET:     [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_target)],
             REPORT_REASON_CAT: [CallbackQueryHandler(button_handler, pattern="^cat_")],
