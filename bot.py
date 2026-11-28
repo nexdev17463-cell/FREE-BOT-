@@ -2510,13 +2510,12 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         from pyrogram import Client
 
-        OFFICIAL_API_ID   = 6
-        OFFICIAL_API_HASH = "eb06d4abfb49dc3eeb1aeb98ae0f581e"
-
+        # Use the same API credentials configured in hosting secrets,
+        # matching /addsession validation and all later session operations.
         client = Client(
             name=f"host_{uid}",
-            api_id=OFFICIAL_API_ID,
-            api_hash=OFFICIAL_API_HASH,
+            api_id=API_ID,
+            api_hash=API_HASH,
             in_memory=True,
             device_model="Samsung Galaxy S23",
             system_version="Android 13",
