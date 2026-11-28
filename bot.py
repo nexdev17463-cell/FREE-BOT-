@@ -2576,7 +2576,6 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "code_delivery": delivery_name,
         }
 
-        masked_phone = phone[:-4].replace(phone[:-4], "*" * max(0, len(phone) - 4)) + phone[-4:]
         logging.info(
             "Pyrogram /host code request accepted for ...%s (delivery=%s, next=%s, timeout=%ss)",
             phone[-4:], delivery_name, next_name, timeout
