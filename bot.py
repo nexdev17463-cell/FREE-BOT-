@@ -2492,7 +2492,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── Account add flow ─────────────────────────────────────────────────────────────
 async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Request a Telegram login code using Telethon's supported auth flow."""
+    """Request a Telegram login code using Pyrogram's native auth flow."""
     uid = update.effective_user.id
     phone = (update.message.text or "").strip()
 
@@ -2509,7 +2509,6 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return ADD_PHONE
 
-    # Close any stale login attempt belonging to this user.
     previous = tmp.pop(uid, None)
     if previous:
         await _close_host_client(previous.get("client"))
@@ -2528,18 +2527,21 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return ConversationHandler.END
 
-        from telethon import TelegramClient
-        from telethon.sessions import StringSession
+        from pyrogram import Client
 
-        client = TelegramClient(
-            StringSession(), API_ID, API_HASH,
-            connection_retries=1,
-            retry_delay=1,
-            timeout=20,
+        client = Client(
+            name=f"host_{uid}_{int(time.time())}",
+            api_id=API_ID,
+            api_hash=API_HASH,
+            in_memory=True,
+            no_updates=True,
+            device_model="Pyrogram Session",
+            system_version="Python",
+            app_version="1.0",
+            lang_code="en",
         )
         await client.connect()
-
-        sent_code = await client.send_code_request(phone)
+        sent_code = await client.send_code(phone)
         phone_code_hash = getattr(sent_code, "phone_code_hash", None)
         if not phone_code_hash:
             raise RuntimeError("Telegram did not return a login-code hash")
@@ -2548,13 +2550,14 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "client": client,
             "phone": phone,
             "phone_code_hash": phone_code_hash,
-            "client_type": "telethon",
+            "client_type": "pyrogram",
             "host_stage": "otp",
         }
 
-        sent_type = type(getattr(sent_code, "type", None)).__name__
-        logging.info("Telegram login code request accepted for %s (delivery=%s)",
-                     phone, sent_type or "unknown")
+        logging.info(
+            "Pyrogram login code request accepted for %s (delivery=%s)",
+            phone, type(getattr(sent_code, "type", None)).__name__ or "unknown"
+        )
 
         await send_rich_message(
             update, ctx,
@@ -2566,7 +2569,7 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return ADD_CODE
 
     except Exception as exc:
-        logging.exception("Telethon /host phone step failed for user %s", uid)
+        logging.exception("Pyrogram /host phone step failed for user %s", uid)
         await _close_host_client(client)
         tmp.pop(uid, None)
         await send_rich_message(
@@ -2591,24 +2594,24 @@ async def _close_host_client(client):
 
 async def _complete_host_session(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
                                   uid: int, data: dict):
-    """Persist the authenticated Telethon StringSession using the shared session manager."""
+    """Export and persist the authenticated Pyrogram StringSession."""
     client = data.get("client")
     try:
         me = await client.get_me()
         if not me:
             raise RuntimeError("Telegram did not return an authenticated account")
 
-        session_string = client.session.save()
+        session_string = await client.export_session_string()
         if not session_string:
-            raise RuntimeError("Telegram returned an empty session string")
+            raise RuntimeError("Pyrogram returned an empty session string")
 
-        phone = str(getattr(me, "phone", None) or data.get("phone") or "").strip()
+        phone = str(getattr(me, "phone_number", None) or data.get("phone") or "").strip()
         if phone and not phone.startswith("+"):
             phone = "+" + phone
         if not phone:
             raise RuntimeError("Could not read the account phone number")
 
-        await save_session(uid, phone, session_string, client_type="telethon")
+        await save_session(uid, phone, session_string, client_type="pyrogram")
         tmp.pop(uid, None)
         await send_rich_message(
             update, ctx,
@@ -2618,7 +2621,7 @@ async def _complete_host_session(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
             main_menu_kb()
         )
     except Exception as exc:
-        logging.exception("Could not complete Telegram /host for user %s", uid)
+        logging.exception("Could not complete Pyrogram /host for user %s", uid)
         tmp.pop(uid, None)
         await send_rich_message(
             update, ctx,
@@ -2655,15 +2658,13 @@ async def recv_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     try:
         await client.sign_in(
-            phone=data["phone"],
-            code=code,
+            phone_number=data["phone"],
             phone_code_hash=data["phone_code_hash"],
+            phone_code=code,
         )
     except Exception as exc:
-        from telethon.errors import SessionPasswordNeededError, PhoneCodeExpiredError, PhoneCodeInvalidError
-
         error_name = type(exc).__name__
-        if isinstance(exc, SessionPasswordNeededError):
+        if error_name in {"SessionPasswordNeeded", "SessionPasswordNeededError"}:
             data["host_stage"] = "2fa"
             await send_rich_message(
                 update, ctx,
@@ -2675,8 +2676,8 @@ async def recv_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return ADD_2FA
 
-        logging.warning("Telegram /host OTP verification failed (%s): %s", error_name, exc)
-        if isinstance(exc, (PhoneCodeExpiredError, PhoneCodeInvalidError)):
+        logging.warning("Pyrogram /host OTP verification failed (%s): %s", error_name, exc)
+        if error_name in {"PhoneCodeExpired", "PhoneCodeInvalid", "PhoneNumberInvalid"}:
             await _close_host_client(client)
             tmp.pop(uid, None)
             await send_rich_message(
@@ -2729,9 +2730,9 @@ async def recv_2fa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return ADD_2FA
 
     try:
-        await client.sign_in(password=password)
+        await client.check_password(password)
     except Exception as exc:
-        logging.warning("Telegram /host 2FA verification failed (%s)", type(exc).__name__)
+        logging.warning("Pyrogram /host 2FA verification failed (%s)", type(exc).__name__)
         await send_rich_message(
             update, ctx,
             "<h2>❌ 2FA VERIFICATION FAILED</h2>"
