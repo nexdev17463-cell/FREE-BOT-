@@ -2589,7 +2589,7 @@ async def _close_host_client(client):
         logging.exception("Could not close Telegram /host client")
 
 
-async def _complete_pyrogram_host(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
+async def _complete_host_session(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
                                   uid: int, data: dict):
     """Persist the authenticated Telethon StringSession using the shared session manager."""
     client = data.get("client")
@@ -2696,7 +2696,7 @@ async def recv_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return ADD_CODE
 
-    await _complete_pyrogram_host(update, ctx, uid, data)
+    await _complete_host_session(update, ctx, uid, data)
     return ConversationHandler.END
 
 
@@ -2741,7 +2741,7 @@ async def recv_2fa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return ADD_2FA
 
-    await _complete_pyrogram_host(update, ctx, uid, data)
+    await _complete_host_session(update, ctx, uid, data)
     return ConversationHandler.END
 
 async def recv_target(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
