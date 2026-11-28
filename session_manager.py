@@ -69,8 +69,24 @@ async def get_user_sessions(user_id: int) -> list[dict]:
     return await get_db().sessions.find({"owner": user_id, "active": True}).to_list(length=None)
 
 async def delete_session(phone: str, user_id: int) -> bool:
-    result = await get_db().sessions.delete_one({"phone": phone, "owner": user_id})
-    return result.deleted_count > 0
+    """Delete one session owned by this user, matching phone formatting safely.
+
+    Older records may store the same phone with/without a leading '+' or with
+    whitespace, and legacy owner values may be serialized as strings.
+    """
+    wanted = "".join(ch for ch in str(phone) if ch.isdigit())
+    if not wanted:
+        return False
+
+    cursor = get_db().sessions.find({
+        "owner": {"$in": [user_id, str(user_id)]}
+    })
+    async for item in cursor:
+        stored = "".join(ch for ch in str(item.get("phone", "")) if ch.isdigit())
+        if stored == wanted:
+            result = await get_db().sessions.delete_one({"_id": item["_id"]})
+            return result.deleted_count > 0
+    return False
 
 async def mark_expired(phone: str):
     await get_db().sessions.update_one(
