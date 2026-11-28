@@ -2000,7 +2000,7 @@ async def cancel_flow(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
     rich = (
-        "<h1>OPERATION CANCELLED</h1>"
+        "<h1>🚫 OPERATION CANCELLED</h1>"
         "<p>Your current process has been safely stopped.</p>"
         "<table bordered striped>"
         "<tr><th>STATUS</th><th>DETAILS</th></tr>"
