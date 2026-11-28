@@ -2005,7 +2005,8 @@ async def cancel_flow(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         try:
             from pyrogram import Client as PyroClient
             if isinstance(data["client"], PyroClient):
-                await data["client"].stop()
+                # /host uses connect(), not start(); disconnect is the matching cleanup.
+                await data["client"].disconnect()
             else:
                 await data["client"].disconnect()
         except Exception:
@@ -2561,6 +2562,7 @@ async def _complete_pyrogram_host(update: Update, ctx: ContextTypes.DEFAULT_TYPE
         if not session_string:
             raise RuntimeError("Pyrogram returned an empty session string")
         await save_session(uid, data["phone"], session_string, client_type="pyrogram")
+        tmp.pop(uid, None)
         await send_rich_message(
             update, ctx,
             "<h1>✅ PYROGRAM SESSION CREATED</h1>"
@@ -2571,6 +2573,7 @@ async def _complete_pyrogram_host(update: Update, ctx: ContextTypes.DEFAULT_TYPE
         tmp.pop(uid, None)
     except Exception as exc:
         logging.exception("Could not save Pyrogram host session for user %s", uid)
+        tmp.pop(uid, None)
         await send_rich_message(
             update, ctx,
             f"<h2>❌ SESSION SAVE FAILED</h2><p><code>{html.escape(str(exc))}</code></p>",
