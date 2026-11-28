@@ -11,7 +11,7 @@ import sys
 from html import escape
 
 from telegram import Update
-from telegram.constants import ChatType, ParseMode
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
