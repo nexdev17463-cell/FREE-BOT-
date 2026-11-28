@@ -552,31 +552,40 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── /host ────────────────────────────────────────────────────────────────
 async def host_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Start a fresh Pyrogram OTP login and create a reusable Pyrogram session."""
+    """Start the native Pyrogram phone → OTP → optional 2FA session flow."""
+    if update.effective_chat.type != "private":
+        await update.effective_message.reply_text(
+            "For account security, /host can only be used in a private chat with this bot."
+        )
+        return ConversationHandler.END
+
     await remember_user(update.effective_user)
     uid = update.effective_user.id
 
-    # Do not orphan a client if the user starts /host again mid-flow.
     previous = tmp.pop(uid, None)
-    if previous and previous.get("client"):
-        try:
-            await previous["client"].disconnect()
-        except Exception:
-            logging.exception("Could not close previous /host client for user %s", uid)
+    if previous:
+        await _close_host_client(previous.get("client"))
+
+    if not API_ID or not API_HASH:
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ PYROGRAM CONFIGURATION MISSING</h2>"
+            "<p>Set valid <code>API_ID</code> and <code>API_HASH</code> in hosting Secrets, then restart the bot.</p>",
+            main_menu_kb()
+        )
+        return ConversationHandler.END
 
     await send_rich_message(
         update, ctx,
         "<h1>📲 PYROGRAM ACCOUNT HOST</h1>"
-        "<p>Connect your own Telegram account using the official OTP login flow.</p>"
+        "<p>This flow creates a fresh Pyrogram session using the API credentials configured in hosting Secrets.</p>"
         "<hr/><p>Send your phone number in international format:</p>"
         "<p><code>+919876543210</code></p>"
-        "<footer>OTP will be requested directly from Telegram. Use only an account you own.</footer>",
+        "<footer>Use only your own Telegram account. Never share your login code or 2FA password with anyone.</footer>",
         cancel_kb()
     )
     return ADD_PHONE
 
-
-# ── /addsession ───────────────────────────────────────────────────────────
 async def addsession_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Add a session directly via string session. Same flow as /host."""
     await remember_user(update.effective_user)
@@ -2484,7 +2493,11 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ── Account add flow ─────────────────────────────────────────────────────────────
 async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    phone = update.message.text.strip()
+    phone = (update.message.text or "").strip()
+
+    if update.effective_chat.type != "private":
+        await update.message.reply_text("Please continue the /host login in a private chat.")
+        return ConversationHandler.END
 
     if not re.fullmatch(r"\+[1-9]\d{7,14}", phone):
         await send_rich_message(
@@ -2495,16 +2508,19 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return ADD_PHONE
 
+    client = None
     try:
-        # Check every stored record, not only currently-active sessions.
         records = await get_all_status_sessions()
-        if any(str(item.get("phone", "")).strip() == phone for item in records):
+        normalized = phone.lstrip("+")
+        if any(str(item.get("phone", "")).strip().lstrip("+") == normalized for item in records):
             await send_rich_message(
                 update, ctx,
-                f"<h2>⚠️ ALREADY ADDED</h2><p><code>{html.escape(phone)}</code> is already present.</p>",
-                cancel_kb()
+                "<h2>⚠️ ACCOUNT ALREADY ADDED</h2>"
+                f"<p><code>{html.escape(phone)}</code> already exists in saved sessions.</p>"
+                "<footer>The existing session was not changed.</footer>",
+                main_menu_kb()
             )
-            return ADD_PHONE
+            return ConversationHandler.END
 
         from pyrogram import Client
         client = Client(
@@ -2530,62 +2546,77 @@ async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         }
         await send_rich_message(
             update, ctx,
-            "<h1>🔐 TELEGRAM OTP SENT</h1>"
-            "<p>Open Telegram and enter the login code you received.</p>"
-            "<footer>Send only the code here. Never share your 2FA password with anyone else.</footer>",
+            "<h1>🔐 TELEGRAM CODE SENT</h1>"
+            "<p>Enter the login code Telegram sent to your account.</p>"
+            "<footer>Send the code only in this private bot chat. Use /cancel to close the login.</footer>",
             cancel_kb()
         )
         return ADD_CODE
 
     except Exception as exc:
-        logging.exception("Pyrogram /host phone step failed for %s", phone)
-        try:
-            if "client" in locals():
-                await client.disconnect()
-        except Exception:
-            pass
+        logging.exception("Pyrogram /host phone step failed for user %s", uid)
+        await _close_host_client(client)
         tmp.pop(uid, None)
         await send_rich_message(
             update, ctx,
-            f"<h2>❌ LOGIN REQUEST FAILED</h2><p><code>{html.escape(str(exc))}</code></p>"
-            "<footer>Check API_ID/API_HASH hosting secrets and try again.</footer>",
-            cancel_kb()
+            "<h2>❌ LOGIN REQUEST FAILED</h2>"
+            f"<p><code>{html.escape(str(exc))}</code></p>"
+            "<footer>Check API_ID/API_HASH in hosting Secrets and try again later.</footer>",
+            main_menu_kb()
         )
-        return ADD_PHONE
+        return ConversationHandler.END
+
+async def _close_host_client(client):
+    """Best-effort cleanup for an in-progress Pyrogram login."""
+    if client is None:
+        return
+    try:
+        if getattr(client, "is_connected", False):
+            await client.disconnect()
+    except Exception:
+        logging.exception("Could not close Pyrogram /host client")
+
 
 async def _complete_pyrogram_host(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
-                                 uid: int, data: dict):
-    """Export and persist the authenticated Pyrogram session, then close the client."""
+                                  uid: int, data: dict):
+    """Verify the authenticated account, export its Pyrogram string session and save it."""
     client = data.get("client")
     try:
+        me = await client.get_me()
+        if not me:
+            raise RuntimeError("Telegram did not return an authenticated account")
+
         session_string = await client.export_session_string()
         if not session_string:
             raise RuntimeError("Pyrogram returned an empty session string")
-        await save_session(uid, data["phone"], session_string, client_type="pyrogram")
+
+        phone = str(me.phone_number or data.get("phone") or "").strip()
+        if phone and not phone.startswith("+"):
+            phone = "+" + phone
+        if not phone:
+            raise RuntimeError("Could not read the account phone number")
+
+        await save_session(uid, phone, session_string, client_type="pyrogram")
         tmp.pop(uid, None)
         await send_rich_message(
             update, ctx,
             "<h1>✅ PYROGRAM SESSION CREATED</h1>"
-            f"<p>Account <code>{html.escape(data['phone'])}</code> is now saved.</p>"
-            "<footer>Session stored securely. You can now use the account-management commands.</footer>",
+            f"<p>Account <code>{html.escape(phone)}</code> was authenticated and saved.</p>"
+            "<footer>The reusable Pyrogram session is stored. You can now manage this account.</footer>",
             main_menu_kb()
         )
-        tmp.pop(uid, None)
     except Exception as exc:
-        logging.exception("Could not save Pyrogram host session for user %s", uid)
+        logging.exception("Could not complete Pyrogram /host for user %s", uid)
         tmp.pop(uid, None)
         await send_rich_message(
             update, ctx,
-            f"<h2>❌ SESSION SAVE FAILED</h2><p><code>{html.escape(str(exc))}</code></p>",
-            cancel_kb()
+            "<h2>❌ SESSION CREATION FAILED</h2>"
+            f"<p><code>{html.escape(str(exc))}</code></p>"
+            "<footer>No success was reported. Start again with /host.</footer>",
+            main_menu_kb()
         )
     finally:
-        if client:
-            try:
-                await client.disconnect()
-            except Exception:
-                logging.exception("Could not disconnect /host client for user %s", uid)
-
+        await _close_host_client(client)
 
 async def recv_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -2594,11 +2625,19 @@ async def recv_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     client = data.get("client")
 
     if not client or data.get("host_stage") != "otp":
-        await send_rich_message(update, ctx,
-            "<h2>⚠️ NO ACTIVE LOGIN</h2><p>Start again with /host.</p>", main_menu_kb())
+        await send_rich_message(
+            update, ctx,
+            "<h2>⚠️ NO ACTIVE LOGIN</h2><p>Start a new login with /host.</p>",
+            main_menu_kb()
+        )
         return ConversationHandler.END
-    if not code or not re.fullmatch(r"[0-9]+", code):
-        await send_rich_message(update, ctx, "<h2>❌ INVALID OTP</h2><p>Enter the numeric Telegram code.</p>", cancel_kb())
+
+    if not re.fullmatch(r"\d{4,8}", code):
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ INVALID CODE FORMAT</h2><p>Enter the numeric code Telegram sent.</p>",
+            cancel_kb()
+        )
         return ADD_CODE
 
     try:
@@ -2608,21 +2647,36 @@ async def recv_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             phone_code=code,
         )
     except Exception as exc:
-        if "SessionPasswordNeeded" in type(exc).__name__:
+        error_name = type(exc).__name__
+        if error_name == "SessionPasswordNeeded":
             data["host_stage"] = "2fa"
             await send_rich_message(
                 update, ctx,
                 "<h1>🔒 TWO-STEP VERIFICATION</h1>"
-                "<p>This account has Telegram 2FA enabled. Enter its password to finish login.</p>",
+                "<p>Your Telegram account has 2-Step Verification enabled.</p>"
+                "<p>Enter your Telegram 2FA password in this private chat.</p>"
+                "<footer>Your password is used only to complete this login and is never saved.</footer>",
                 cancel_kb()
             )
             return ADD_2FA
 
-        logging.warning("Pyrogram /host OTP verification failed: %s", exc)
+        logging.warning("Pyrogram /host OTP verification failed (%s): %s", error_name, exc)
+        if error_name in {"PhoneCodeExpired", "PhoneCodeInvalid", "PhoneNumberInvalid"}:
+            await _close_host_client(client)
+            tmp.pop(uid, None)
+            await send_rich_message(
+                update, ctx,
+                "<h2>❌ LOGIN CODE REJECTED</h2>"
+                "<p>The code is invalid or expired. Start again with /host to request a fresh code.</p>",
+                main_menu_kb()
+            )
+            return ConversationHandler.END
+
         await send_rich_message(
             update, ctx,
-            f"<h2>❌ OTP NOT ACCEPTED</h2><p><code>{html.escape(str(exc))}</code></p>"
-            "<footer>Check the code and try again, or use /cancel to stop.</footer>",
+            "<h2>❌ OTP VERIFICATION FAILED</h2>"
+            f"<p><code>{html.escape(str(exc))}</code></p>"
+            "<footer>You can retry the code or use /cancel to stop.</footer>",
             cancel_kb()
         )
         return ADD_CODE
@@ -2636,22 +2690,37 @@ async def recv_2fa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = tmp.get(uid) or {}
     client = data.get("client")
 
+    # Remove the password message from the chat as soon as it has been read.
+    try:
+        await update.message.delete()
+    except Exception:
+        logging.debug("Could not delete 2FA password message for user %s", uid)
+
     if not client or data.get("host_stage") != "2fa":
-        await send_rich_message(update, ctx,
-            "<h2>⚠️ NO ACTIVE 2FA LOGIN</h2><p>Start again with /host.</p>", main_menu_kb())
+        await send_rich_message(
+            update, ctx,
+            "<h2>⚠️ NO ACTIVE 2FA LOGIN</h2><p>Start a new login with /host.</p>",
+            main_menu_kb()
+        )
         return ConversationHandler.END
+
     if not password:
-        await send_rich_message(update, ctx, "<h2>❌ EMPTY PASSWORD</h2><p>Enter your Telegram 2FA password.</p>", cancel_kb())
+        await send_rich_message(
+            update, ctx,
+            "<h2>❌ EMPTY PASSWORD</h2><p>Enter your Telegram 2FA password.</p>",
+            cancel_kb()
+        )
         return ADD_2FA
 
     try:
         await client.check_password(password)
     except Exception as exc:
-        logging.warning("Pyrogram /host 2FA verification failed: %s", exc)
+        logging.warning("Pyrogram /host 2FA verification failed (%s)", type(exc).__name__)
         await send_rich_message(
             update, ctx,
-            f"<h2>❌ 2FA PASSWORD NOT ACCEPTED</h2><p><code>{html.escape(str(exc))}</code></p>"
-            "<footer>Try again or use /cancel. Your password is not saved.</footer>",
+            "<h2>❌ 2FA VERIFICATION FAILED</h2>"
+            "<p>The password was not accepted. Try again or use /cancel.</p>"
+            "<footer>Your password is not stored by the bot.</footer>",
             cancel_kb()
         )
         return ADD_2FA
@@ -2659,7 +2728,6 @@ async def recv_2fa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await _complete_pyrogram_host(update, ctx, uid, data)
     return ConversationHandler.END
 
-# ── Report flow ─────────────────────────────────────────────────────────────
 async def recv_target(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid    = update.effective_user.id
     target = update.message.text.strip()
