@@ -552,14 +552,25 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── /host ────────────────────────────────────────────────────────────────
 async def host_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Start a fresh Pyrogram OTP login and create a reusable Pyrogram session."""
     await remember_user(update.effective_user)
+    uid = update.effective_user.id
+
+    # Do not orphan a client if the user starts /host again mid-flow.
+    previous = tmp.pop(uid, None)
+    if previous and previous.get("client"):
+        try:
+            await previous["client"].disconnect()
+        except Exception:
+            logging.exception("Could not close previous /host client for user %s", uid)
+
     await send_rich_message(
         update, ctx,
-        "<h2>➕ ADD ACCOUNT</h2>"
-        "<p><i>Connect your Telegram account via OTP</i></p><hr/>"
-        "<p>Enter your phone number with country code:</p>"
+        "<h1>📲 PYROGRAM ACCOUNT HOST</h1>"
+        "<p>Connect your own Telegram account using the official OTP login flow.</p>"
+        "<hr/><p>Send your phone number in international format:</p>"
         "<p><code>+919876543210</code></p>"
-        "<footer>An OTP will be sent to your Telegram app.</footer>",
+        "<footer>OTP will be requested directly from Telegram. Use only an account you own.</footer>",
         cancel_kb()
     )
     return ADD_PHONE
@@ -2471,90 +2482,121 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── Account add flow ─────────────────────────────────────────────────────────────
 async def recv_phone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid   = update.effective_user.id
+    uid = update.effective_user.id
     phone = update.message.text.strip()
 
-    if not re.fullmatch(r"\+[1-9]\d{7,14}", phone):
+    if not re.fullmatch(r"\\+[1-9]\\d{7,14}", phone):
         await send_rich_message(
             update, ctx,
-            "<h2>❌ INVALID FORMAT</h2>"
-            "<p>Use international format: <code>+919876543210</code></p>"
-            "<footer>Include the country code with + prefix.</footer>",
+            "<h2>❌ INVALID PHONE NUMBER</h2>"
+            "<p>Use international format, for example <code>+919876543210</code>.</p>",
             cancel_kb()
         )
         return ADD_PHONE
 
     try:
-        existing_sessions = await get_all_sessions()
-    except Exception:
-        logging.exception("Could not check whether phone is already hosted")
-        await send_rich_message(
-            update, ctx,
-            "<h2>❌ DATABASE CHECK FAILED</h2>"
-            "<p>Could not verify whether this account is already hosted.</p>"
-            "<footer>Please try again later. No OTP was requested.</footer>",
-            cancel_kb()
-        )
-        return ADD_PHONE
+        # Check every stored record, not only currently-active sessions.
+        records = await get_all_status_sessions()
+        if any(str(item.get("phone", "")).strip() == phone for item in records):
+            await send_rich_message(
+                update, ctx,
+                f"<h2>⚠️ ALREADY ADDED</h2><p><code>{html.escape(phone)}</code> is already present.</p>",
+                cancel_kb()
+            )
+            return ADD_PHONE
 
-    if any(str(item.get("phone", "")).strip() == phone for item in existing_sessions):
-        await send_rich_message(
-            update, ctx,
-            "<h2>⚠️ ACCOUNT ALREADY HOSTED</h2>"
-            f"<p><code>{html.escape(phone)}</code> is already hosted in this bot.</p>"
-            "<footer>No OTP was sent and the existing session was left unchanged.</footer>",
-            cancel_kb()
-        )
-        return ADD_PHONE
-
-    try:
         from pyrogram import Client
-
-        # Use the same API credentials configured in hosting secrets,
-        # matching /addsession validation and all later session operations.
         client = Client(
-            name=f"host_{uid}",
+            name=f"host_{uid}_{int(time.time())}",
             api_id=API_ID,
             api_hash=API_HASH,
             in_memory=True,
-            device_model="Samsung Galaxy S23",
-            system_version="Android 13",
-            app_version="10.0.1",
-            lang_code="en",
             no_updates=True,
+            device_model="Pyrogram Session",
+            system_version="Python",
+            app_version="1.0",
+            lang_code="en",
         )
+
         await client.connect()
         sent_code = await client.send_code(phone)
-        tmp[uid]  = {
-            "client":          client,
-            "phone":           phone,
+        tmp[uid] = {
+            "client": client,
+            "phone": phone,
             "phone_code_hash": sent_code.phone_code_hash,
-            "client_type":     "pyrogram",
+            "client_type": "pyrogram",
+            "host_stage": "otp",
         }
         await send_rich_message(
             update, ctx,
-            "<h2>🔑 OTP SENT</h2>"
-            "<p>A verification code was sent to your Telegram app.</p>"
-            "<p>Enter the OTP below to continue:</p>"
-            "<footer>The code expires in a few minutes.</footer>",
+            "<h1>🔐 TELEGRAM OTP SENT</h1>"
+            "<p>Open Telegram and enter the login code you received.</p>"
+            "<footer>Send only the code here. Never share your 2FA password with anyone else.</footer>",
             cancel_kb()
         )
         return ADD_CODE
 
-    except Exception as e:
+    except Exception as exc:
+        logging.exception("Pyrogram /host phone step failed for %s", phone)
+        try:
+            if "client" in locals():
+                await client.disconnect()
+        except Exception:
+            pass
+        tmp.pop(uid, None)
         await send_rich_message(
             update, ctx,
-            f"<h2>❌ ERROR</h2><p><code>{html.escape(str(e))}</code></p>",
+            f"<h2>❌ LOGIN REQUEST FAILED</h2><p><code>{html.escape(str(exc))}</code></p>"
+            "<footer>Check API_ID/API_HASH hosting secrets and try again.</footer>",
             cancel_kb()
         )
         return ADD_PHONE
 
+async def _complete_pyrogram_host(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
+                                 uid: int, data: dict):
+    """Export and persist the authenticated Pyrogram session, then close the client."""
+    client = data.get("client")
+    try:
+        session_string = await client.export_session_string()
+        if not session_string:
+            raise RuntimeError("Pyrogram returned an empty session string")
+        await save_session(uid, data["phone"], session_string, client_type="pyrogram")
+        await send_rich_message(
+            update, ctx,
+            "<h1>✅ PYROGRAM SESSION CREATED</h1>"
+            f"<p>Account <code>{html.escape(data['phone'])}</code> is now saved.</p>"
+            "<footer>Session stored securely. You can now use the account-management commands.</footer>",
+            main_menu_kb()
+        )
+        tmp.pop(uid, None)
+    except Exception as exc:
+        logging.exception("Could not save Pyrogram host session for user %s", uid)
+        await send_rich_message(
+            update, ctx,
+            f"<h2>❌ SESSION SAVE FAILED</h2><p><code>{html.escape(str(exc))}</code></p>",
+            cancel_kb()
+        )
+    finally:
+        if client:
+            try:
+                await client.disconnect()
+            except Exception:
+                logging.exception("Could not disconnect /host client for user %s", uid)
+
 
 async def recv_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid    = update.effective_user.id
-    code   = update.message.text.strip()
-    data   = tmp.get(uid, {})
+    uid = update.effective_user.id
+    code = re.sub(r"\\s+", "", update.message.text or "")
+    data = tmp.get(uid) or {}
     client = data.get("client")
+
+    if not client or data.get("host_stage") != "otp":
+        await send_rich_message(update, ctx,
+            "<h2>⚠️ NO ACTIVE LOGIN</h2><p>Start again with /host.</p>", main_menu_kb())
+        return ConversationHandler.END
+    if not code or not re.fullmatch(r"[0-9]+", code):
+        await send_rich_message(update, ctx, "<h2>❌ INVALID OTP</h2><p>Enter the numeric Telegram code.</p>", cancel_kb())
+        return ADD_CODE
 
     try:
         await client.sign_in(
@@ -2562,73 +2604,57 @@ async def recv_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             phone_code_hash=data["phone_code_hash"],
             phone_code=code,
         )
-    except Exception as e:
-        if "SessionPasswordNeeded" in type(e).__name__:
+    except Exception as exc:
+        if "SessionPasswordNeeded" in type(exc).__name__:
+            data["host_stage"] = "2fa"
             await send_rich_message(
                 update, ctx,
-                "<h2>🔐 TWO-FACTOR AUTH</h2>"
-                "<p>Your account has 2FA enabled.</p>"
-                "<p>Enter your 2FA password to continue:</p>",
+                "<h1>🔒 TWO-STEP VERIFICATION</h1>"
+                "<p>This account has Telegram 2FA enabled. Enter its password to finish login.</p>",
                 cancel_kb()
             )
             return ADD_2FA
-        await send_rich_message(
-            update, ctx,
-            f"<h2>❌ OTP ERROR</h2><p><code>{html.escape(str(e))}</code></p>",
-        )
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
-        tmp.pop(uid, None)
-        return ConversationHandler.END
 
-    try:
-        session_str = await client.export_session_string()
-        await client.disconnect()
-        await save_session(uid, data["phone"], session_str, client_type="pyrogram")
+        logging.warning("Pyrogram /host OTP verification failed: %s", exc)
         await send_rich_message(
             update, ctx,
-            f"<h1>✅ ACCOUNT ADDED</h1>"
-            f"<p><code>{html.escape(data['phone'])}</code> connected successfully.</p>"
-            "<footer>Your session has been saved.</footer>",
-            main_menu_kb()
+            f"<h2>❌ OTP NOT ACCEPTED</h2><p><code>{html.escape(str(exc))}</code></p>"
+            "<footer>Check the code and try again, or use /cancel to stop.</footer>",
+            cancel_kb()
         )
-        tmp.pop(uid, None)
-    except Exception as e:
-        await send_rich_message(
-            update, ctx,
-            f"<h2>❌ SESSION SAVE ERROR</h2><p><code>{html.escape(str(e))}</code></p>"
-        )
+        return ADD_CODE
+
+    await _complete_pyrogram_host(update, ctx, uid, data)
     return ConversationHandler.END
 
-
 async def recv_2fa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid      = update.effective_user.id
-    password = update.message.text.strip()
-    data     = tmp.get(uid, {})
-    client   = data.get("client")
+    uid = update.effective_user.id
+    password = update.message.text or ""
+    data = tmp.get(uid) or {}
+    client = data.get("client")
+
+    if not client or data.get("host_stage") != "2fa":
+        await send_rich_message(update, ctx,
+            "<h2>⚠️ NO ACTIVE 2FA LOGIN</h2><p>Start again with /host.</p>", main_menu_kb())
+        return ConversationHandler.END
+    if not password:
+        await send_rich_message(update, ctx, "<h2>❌ EMPTY PASSWORD</h2><p>Enter your Telegram 2FA password.</p>", cancel_kb())
+        return ADD_2FA
 
     try:
         await client.check_password(password)
-        session_str = await client.export_session_string()
-        await client.disconnect()
-        await save_session(uid, data["phone"], session_str, client_type="pyrogram")
+    except Exception as exc:
+        logging.warning("Pyrogram /host 2FA verification failed: %s", exc)
         await send_rich_message(
             update, ctx,
-            f"<h1>✅ ACCOUNT ADDED</h1>"
-            f"<p><code>{html.escape(data['phone'])}</code> connected successfully.</p>"
-            "<footer>Your session has been saved.</footer>",
-            main_menu_kb()
+            f"<h2>❌ 2FA PASSWORD NOT ACCEPTED</h2><p><code>{html.escape(str(exc))}</code></p>"
+            "<footer>Try again or use /cancel. Your password is not saved.</footer>",
+            cancel_kb()
         )
-        tmp.pop(uid, None)
-    except Exception as e:
-        await send_rich_message(
-            update, ctx,
-            f"<h2>❌ 2FA FAILED</h2><p><code>{html.escape(str(e))}</code></p>"
-        )
-    return ConversationHandler.END
+        return ADD_2FA
 
+    await _complete_pyrogram_host(update, ctx, uid, data)
+    return ConversationHandler.END
 
 # ── Report flow ─────────────────────────────────────────────────────────────
 async def recv_target(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
